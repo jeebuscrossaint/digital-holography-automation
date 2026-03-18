@@ -1,0 +1,86 @@
+# Experiment Configuration for Digital Holography Data Collection
+# Photonic Lantern Testbed - UCF CREOL
+
+# Hardware Settings
+hardware:
+  laser:
+    gpib_address: "GPIB0::24::INSTR"
+    power_uw: 208  # Power in microwatts
+    power_unit: "UW"
+  
+  camera:
+    url: "cam://0?fg=none"  # Auto-detect camera, or specify URL
+    # For GigE cameras, URL format may be: "gev://192.168.1.x" or similar
+    # Run dev_discovery() to find the correct URL
+    calibration_file: "./hardware/calibration/XC-(10-06-2021)-500us_14931.xca"
+    exposure_time: 500  # microseconds
+    # GigE-specific settings (Bobcat 320 GigE via Ethernet-to-USB adapter)
+    model: "Bobcat 320 GigE"
+    interface: "GigE Vision (Ethernet-to-USB adapter)"
+  
+  fiber_switch:
+    port: "COM6"
+    baudrate: 9600
+    module: 1  # Module number for switch commands
+  
+  polarization_motors:
+    serial_number: "38394984"
+    max_travel: 160  # degrees
+    initial_angles: [0, 0, 0]  # Starting angles for 3 paddles
+
+# Experiment Parameters
+experiment:
+  # Which legs (output ports) of the photonic lantern to test
+  legs: [1, 2, 3, 4, 5, 6, 7]  # Adjust based on your lantern
+  
+  # Wavelengths to test (in nanometers)
+  wavelengths: [1540, 1545, 1550, 1555, 1560, 1565, 1570]
+  
+  # Wait times for system stabilization (in seconds)
+  wait_times:
+    after_leg_switch: 1.0  # Wait after switching fiber
+    after_wavelength_change: 0.5  # Wait after changing wavelength
+    after_polarization_adjust: 0.3  # Wait after moving motors
+  
+  # Fringe detection settings
+  fringe_detection:
+    enabled: true
+    min_visibility: 0.15  # Minimum fringe visibility (0-1)
+    max_attempts: 5  # Max polarization adjustment attempts
+    check_method: "variance"  # "variance" or "fft_peaks"
+  
+  # Polarization adjustment strategy
+  polarization:
+    auto_adjust: true
+    search_method: "grid"  # "grid", "random", or "gradient"
+    angle_step: 10  # degrees for grid search
+    angle_range: [0, 160]  # Min/max angles for each motor
+
+# Data Storage
+data:
+  output_dir: "./holography_data"
+  filename_format: "leg{leg:02d}-wavelength{wavelength:04d}.npy"
+  save_metadata: true  # Save acquisition parameters with each image
+  
+# Processing Parameters  
+processing:
+  # FFT and image analysis
+  image_size: [640, 512]  # Camera image dimensions [width, height]
+  crop_size: 100  # Size for cropping twin images
+  
+  # Mode decomposition
+  num_modes: 7  # Number of LP modes to decompose
+  core_radius: 25e-6  # meters
+  numerical_aperture: 0.11
+  effective_index: 1.453
+  pixel_size: 70e-6  # meters
+  
+  # Phase correction
+  quadratic_phase_correction: true
+  phase_factor_range: [-2, 2]  # Range for phase factor optimization
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  save_log_file: true
+  log_file: "./experiment_log.txt"

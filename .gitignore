@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -205,3 +204,44 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ============================================
+# EXPERIMENT-SPECIFIC FILES
+# ============================================
+
+# AI tool local memory (machine-specific)
+.claude/
+
+# Holography data files (large binary arrays)
+holography_data/
+*.npy
+
+# Processing results
+processed_results/
+*_results.npz
+*_analysis.png
+
+# Experiment logs
+experiment_log.txt
+*.log
+
+# Session metadata (optional - may want to commit these)
+# session_summary.yaml
+# processing_summary.yaml
+
+# Temporary calibration files
+*.xca.tmp
+*.bak
+
+# Large PowerPoint/presentation files (already in repo)
+# Uncomment if you want to exclude:
+# *.pptx
+# *.ppt
+
+# Local config overrides (if you make machine-specific configs)
+experiment_config.local.yaml
+local_config.yaml
+
+# Test output
+test_output/
+test_frames/

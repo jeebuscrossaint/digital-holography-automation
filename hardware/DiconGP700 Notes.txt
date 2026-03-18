@@ -1,0 +1,10 @@
+You have to connect to the box using a serial RS-232 connection.  I think default settings are okay, 9600 Baud
+
+This manual seems close:
+https://www.artisantg.com/info/Dicon_GP700_Manual.pdf#:~:text=The%20front%20panel%20consists%20of,connectors.
+
+
+"M1 2"  seemed to work.
+
+I forget how you end it.  I think \r\n for return carriage\new line.     
+
