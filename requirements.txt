@@ -19,9 +19,9 @@ pyyaml>=5.4.0
 pyserial>=3.5
 pyvisa>=1.11.0
 pyvisa-py>=0.5.0
+gpib-ctypes>=0.3.0
 
-# Image processing
-opencv-python>=4.5.0
+# Image processing (PIL for camera preview in GUI)
 Pillow>=8.0.0
 
 # Xeneth camera SDK (must be installed separately)
