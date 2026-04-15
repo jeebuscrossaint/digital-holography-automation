@@ -65,7 +65,10 @@ class xCam:
             if self.cam.is_initialized:
                 self.pid = self.cam.get_property_value("_CAM_PID")
                 self.ser = self.cam.get_property_value("_CAM_SER")
-                self.exposure_time = self.cam.get_property_value("ExposureTime")
+                try:
+                    self.exposure_time = self.cam.get_property_value("ExposureTime")
+                except Exception:
+                    self.exposure_time = 500.0  # default if property unavailable
                 # Output the product id and serial and exposure time
                 print(f"Controlling camera with PID: 0x{int(self.pid):X}, SER: {self.ser}, ExposureTime: {self.exposure_time}")
             

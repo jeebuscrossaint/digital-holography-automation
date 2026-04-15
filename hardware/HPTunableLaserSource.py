@@ -18,11 +18,13 @@ class HPTunableLaserSource:
         print(rm.list_resources())
         try:
             self.TL = rm.open_resource(TLName)
-        except:
-            print("itwasopen")
-            self.TL.close() #in case the TL wasn't closed at the end of the last session
-            
-            self.TL = rm.open_resource('TLName')
+        except Exception:
+            # Resource may have been left open from a previous session — close and retry
+            try:
+                rm.open_resource(TLName).close()
+            except Exception:
+                pass
+            self.TL = rm.open_resource(TLName)
         
     def outputState(self,tf):  #1 is on, 0 is off
         if tf:
