@@ -61,6 +61,30 @@ LOG_TAG_COLOR = {
 }
 
 
+def _friendly_error(e: Exception) -> str:
+    """Turn raw exception messages into plain-English hints."""
+    msg = str(e)
+    low = msg.lower()
+    if "gpib" in low or "linux-gpib" in low or "gpib_ctypes" in low or "no module named 'gpib'" in low:
+        return "GPIB driver not installed — run:  pip install gpib-ctypes"
+    if "could not open port" in low:
+        import re
+        port = re.search(r"'(COM\d+)'", msg)
+        p = port.group(1) if port else "the COM port"
+        return f"{p} not found — is the device plugged in and the right port set in config?"
+    if "polarizer.dll" in low or ("kinesis" in low and "dll" in low):
+        return "Thorlabs Kinesis DLL not found — install Kinesis software and plug in motors"
+    if "could not find module" in low and ".dll" in low:
+        import re
+        dll = re.search(r"'([^']+\.dll)'", msg)
+        name = dll.group(1).split("\\")[-1] if dll else "a required DLL"
+        return f"Missing DLL: {name} — check driver installation"
+    if "exposuretime" in low or "property" in low:
+        return f"Camera property error (may still work): {msg}"
+    # Fallback — strip giant tracebacks, just keep first line
+    return msg.split("\n")[0][:120]
+
+
 # ── Application ───────────────────────────────────────────────────────────────
 
 class HolographyApp:
@@ -467,6 +491,8 @@ class HolographyApp:
 
     def _connect_worker(self):
         q = self.msg_queue
+        _ok: list[str] = []
+        _fail: list[str] = []
 
         def emit(text, level="INFO"):
             q.put({"type": "log", "text": text, "level": level})
@@ -476,74 +502,86 @@ class HolographyApp:
 
         # Laser ---------------------------------------------------------------
         hw("laser", "connecting")
-        emit("Connecting to HP Tunable Laser…")
+        cfg_l = self.config.get("hardware", {}).get("laser", {})
+        addr  = cfg_l.get("gpib_address", "GPIB0::24::INSTR")
+        emit(f"Laser — trying {addr}…")
         try:
             from HPTunableLaserSource import HPTunableLaserSource
-            cfg_l = self.config.get("hardware", {}).get("laser", {})
-            self.laser = HPTunableLaserSource(
-                cfg_l.get("gpib_address", "GPIB0::24::INSTR"))
+            self.laser = HPTunableLaserSource(addr)
             self.laser.changePowerUnit(cfg_l.get("power_unit", "UW"))
             self.laser.powerAmplitude(cfg_l.get("power_uw", 208))
             self.laser.outputState(True)
             hw("laser", "connected")
-            emit("✓ Laser connected and output ON", "OK")
+            emit(f"✓ Laser  {addr}  output ON  ({cfg_l.get('power_uw', 208)} µW)", "OK")
+            _ok.append("Laser")
         except Exception as e:
             hw("laser", "error")
-            emit(f"✗ Laser: {e}", "WARN")
+            emit(f"✗ Laser — {_friendly_error(e)}", "WARN")
+            _fail.append("Laser")
 
         # Camera --------------------------------------------------------------
         hw("camera", "connecting")
-        emit("Connecting to Xenics Bobcat camera…")
+        cfg_c = self.config.get("hardware", {}).get("camera", {})
+        url   = cfg_c.get("url", "cam://0")
+        if not url or url in ("auto", ""):
+            url = "cam://0"
+        emit(f"Camera — trying {url}…")
         try:
             from XenicsCam import xCam, dev_discovery
-            cfg_c = self.config.get("hardware", {}).get("camera", {})
-            url = cfg_c.get("url", "cam://0")
-            if not url or url in ("auto", ""):
-                url = dev_discovery()
             self.camera = xCam(url=url)
+            ser = int(self.camera.ser) if self.camera.ser else "?"
             hw("camera", "connected")
-            emit(f"✓ Camera connected (SER:{int(self.camera.ser)})", "OK")
+            emit(f"✓ Camera  Xenics Bobcat 320 GigE  SER:{ser}", "OK")
+            _ok.append("Camera")
             frame = self.camera.getFrame()
             if frame is not None:
                 q.put({"type": "frame", "data": frame})
+            else:
+                emit("  (no frame yet — need light on sensor)", "DEBUG")
         except Exception as e:
             hw("camera", "error")
-            emit(f"✗ Camera: {e}", "WARN")
+            emit(f"✗ Camera — {_friendly_error(e)}", "WARN")
+            _fail.append("Camera")
 
         # Fiber switch --------------------------------------------------------
         hw("switch", "connecting")
-        emit("Connecting to Dicon fiber switch…")
+        cfg_s = self.config.get("hardware", {}).get("fiber_switch", {})
+        port  = cfg_s.get("port", "COM6")
+        emit(f"Fiber switch — trying {port}…")
         try:
             from D700DiconSwitch import D700DiconSwitch
-            cfg_s = self.config.get("hardware", {}).get("fiber_switch", {})
-            self.switch = D700DiconSwitch(
-                port=cfg_s.get("port", "COM6"),
-                baudrate=cfg_s.get("baudrate", 9600))
+            self.switch = D700DiconSwitch(port=port, baudrate=cfg_s.get("baudrate", 9600))
             hw("switch", "connected")
-            emit(f"✓ Switch connected ({cfg_s.get('port', 'COM6')})", "OK")
+            emit(f"✓ Switch  Dicon GP700  {port}", "OK")
+            _ok.append("Switch")
         except Exception as e:
             hw("switch", "error")
-            emit(f"✗ Switch: {e}", "WARN")
+            emit(f"✗ Switch — {_friendly_error(e)}", "WARN")
+            _fail.append("Switch")
 
         # Polarization motors -------------------------------------------------
         hw("motors", "connecting")
-        emit("Connecting to Thorlabs polarization motors…")
+        cfg_m  = self.config.get("hardware", {}).get("polarization_motors", {})
+        serial = str(cfg_m.get("serial_number", "38394984"))
+        emit(f"Polarization motors — SN {serial}…")
         try:
             from polMotors import polMotors
-            cfg_m = self.config.get("hardware", {}).get("polarization_motors", {})
-            serial = str(cfg_m.get("serial_number", "38394984")).encode()
-            self.motors = polMotors(serialNumber=serial)
+            self.motors = polMotors(serialNumber=serial.encode())
             for i, angle in enumerate(cfg_m.get("initial_angles", [0, 0, 0])):
                 self.motors.moveMotor(i + 1, angle)
             while self.motors.isBusy():
                 time.sleep(0.1)
             hw("motors", "connected")
-            emit("✓ Motors connected and homed", "OK")
+            emit(f"✓ Motors  Thorlabs MPC320  SN:{serial}  homed", "OK")
+            _ok.append("Motors")
         except Exception as e:
             hw("motors", "error")
-            emit(f"✗ Motors: {e}", "WARN")
+            emit(f"✗ Motors — {_friendly_error(e)}", "WARN")
+            _fail.append("Motors")
 
-        self.hardware_connected = True
+        # Summary -------------------------------------------------------------
+        self._connected_names = _ok
+        self.hardware_connected = len(_ok) > 0
         q.put({"type": "done", "event": "connect", "success": True})
 
     def _disconnect_hardware(self):
@@ -798,11 +836,31 @@ class HolographyApp:
         self._stop_btn.configure(state="disabled")
 
         if event == "connect":
+            ok    = getattr(self, "_connected_names", [])
+            all_4 = ("Laser", "Camera", "Switch", "Motors")
+            off   = [d for d in all_4 if d not in ok]
+
             self._connect_btn.configure(state="disabled")
             self._disconnect_btn.configure(state="normal")
-            self._start_btn.configure(state="normal")
-            self._status_var.set("Hardware connected — ready to run")
-            self._log("All hardware connected. Click ▶ START when ready.", "OK")
+
+            if len(ok) == 4:
+                self._status_var.set("All 4 devices connected — ready to run")
+                self._log("All hardware connected. Press ▶ START when ready.", "OK")
+            elif len(ok) == 0:
+                self._status_var.set("No devices connected — check cables & config")
+                self._log("No devices connected. Check cables, COM ports, and GPIB address.", "ERROR")
+                # Re-enable connect so they can retry after fixing things
+                self._connect_btn.configure(state="normal")
+                self._disconnect_btn.configure(state="disabled")
+            else:
+                summary = f"{len(ok)}/4 connected: {', '.join(ok)}"
+                missing = f"Offline: {', '.join(off)}"
+                self._status_var.set(f"{summary} — {missing}")
+                self._log(f"{summary}", "OK")
+                self._log(f"{missing} — plug in and click Connect to retry", "WARN")
+
+            # Enable START as long as something is connected
+            self._start_btn.configure(state="normal" if ok else "disabled")
         elif event == "experiment":
             self._start_btn.configure(
                 state="normal" if self.hardware_connected else "disabled")
