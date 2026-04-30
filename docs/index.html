@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Photonic Lantern Holography Automation</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <h1>Photonic Lantern Holography Automation</h1>
+    <p class="sub">End-to-end automation for characterizing photonic lanterns via digital holography — UCF CREOL Astrophotonics Lab</p>
+    <a href="https://github.com/jeebuscrossaint/doohickeydinklecombobertothe12thfactorial" target="_blank">View on GitHub →</a>
+  </header>
+
+  <main>
+
+    <section>
+      <h2>Overview</h2>
+      <p>
+        Characterizing a photonic lantern requires acquiring interference pattern images across
+        multiple output ports and optical wavelengths, then reconstructing the electric field
+        from each hologram using Fourier optics. Done manually, a single session takes several
+        hours of careful alignment and tuning.
+      </p>
+      <p>
+        This project automates the entire pipeline — hardware control, fringe optimization,
+        data collection, and field reconstruction — reducing operator time to minutes.
+        Built for Dr. Eikenberry's group at <strong>UCF CREOL</strong>, based on prior testbed
+        work by Caleb Dobias and Miguel Romer.
+      </p>
+    </section>
+
+    <section>
+      <h2>Hardware</h2>
+      <ul>
+        <li><strong>HP 8168E Tunable Laser</strong> — 1475–1575 nm, GPIB control</li>
+        <li><strong>Dicon GP700 Fiber Switch</strong> — selects photonic lantern output port, RS-232</li>
+        <li><strong>Thorlabs Motorized Polarization Controller</strong> — 3-axis stepper motors, USB</li>
+        <li><strong>Xenics Bobcat 320 GigE Camera</strong> — InGaAs sensor, captures hologram frames</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Features</h2>
+      <ul>
+        <li>Single-command connection and safe shutdown of all four hardware devices</li>
+        <li>Automated (legs × wavelengths) acquisition loop — 49 images in ~30 minutes unattended</li>
+        <li>Real-time fringe visibility detection (variance, Michelson contrast, or FFT peak methods)</li>
+        <li>Automatic polarization optimization via motor grid search when fringes are poor</li>
+        <li>FFT-based holography: twin image extraction, IFFT field recovery, optional defocus correction</li>
+        <li>LP mode decomposition across 7-port lantern with fidelity metrics</li>
+        <li>12-panel analysis plots per hologram (raw → FFT → field → modes → power distribution)</li>
+        <li>GUI (Tkinter) and CLI interfaces; long-running operations run in background threads</li>
+        <li>Single YAML config for all hardware addresses, experiment parameters, and processing options</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <p>
+        The collection loop iterates over each lantern port and each wavelength. For every
+        combination it sets the laser, captures a frame, and checks fringe visibility. If the
+        fringes are below threshold, the polarization motors perform a grid search to find the
+        best alignment before saving the image and metadata.
+      </p>
+      <p>
+        Processing runs the saved holograms through a 2D FFT, isolates one sideband in Fourier
+        space, and inverse-transforms to recover the complex electric field. That field is then
+        projected onto an LP mode basis to produce the mode decomposition coefficients and plots.
+      </p>
+    </section>
+
+    <section>
+      <h2>Stack</h2>
+      <ul class="stack">
+        <li><strong>Python 3.8+</strong> — core implementation</li>
+        <li><strong>NumPy / SciPy</strong> — FFT, signal processing, mode decomposition</li>
+        <li><strong>PyVISA + GPIB-ctypes</strong> — laser instrument control</li>
+        <li><strong>PySerial</strong> — RS-232 fiber switch control</li>
+        <li><strong>ctypes</strong> — Thorlabs Kinesis DLL and Xenics SDK bindings</li>
+        <li><strong>Matplotlib</strong> — visualization and analysis plots</li>
+        <li><strong>PyYAML</strong> — configuration management</li>
+        <li><strong>Tkinter</strong> — GUI interface</li>
+      </ul>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>
+      Built by <a href="https://github.com/jeebuscrossaint" target="_blank">jeebuscrossaint</a>
+      &nbsp;·&nbsp; UCF CREOL Astrophotonics Lab
+    </p>
+  </footer>
+
+</body>
+</html>
