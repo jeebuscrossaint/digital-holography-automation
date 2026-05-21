@@ -42,25 +42,33 @@ class polMotors:  # max travel 160°
                              else str(serialNumber).encode())
 
         _check("MPC_Open", self.lib.MPC_Open(self.serialNumber))
-        self.lib.MPC_StartPolling(self.serialNumber, 200)
+
+        if not self.lib.MPC_StartPolling(self.serialNumber, 200):
+            raise RuntimeError("MPC_StartPolling failed")
+
+        # Settings must be loaded before the controller will accept moves /
+        # individual homing — otherwise MPC_Home returns code 43 (no motor info)
+        self.lib.MPC_LoadSettings(self.serialNumber)
+        time.sleep(2.5)
+
         self.lib.MPC_ClearMessageQueue(self.serialNumber)
-        time.sleep(0.5)
 
         _check("MPC_SetEnabledPaddles",
                self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES))
 
-        for paddle in (1, 2, 3):
-            _check(f"MPC_Home paddle {paddle}",
-                   self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[paddle]))
+        # Home everything in a single call with the AllPaddles bitmask.
+        # Per-paddle Home calls can return error 43 ("no motor info") for
+        # paddle 3 if the previous home is still in flight.
+        _check("MPC_Home (all paddles)",
+               self.lib.MPC_Home(self.serialNumber, _ALL_PADDLES))
 
-        # Wait until every paddle reports homed (timeout 20 s) — moves are
-        # silently rejected with MOT_NotHomed otherwise
-        deadline = time.time() + 20
-        for paddle in (1, 2, 3):
-            while time.time() < deadline:
-                if self._status(paddle) & _STATUS_HOMED:
-                    break
-                time.sleep(0.1)
+        # Wait until every paddle reports the HOMED bit (timeout 30 s) — moves
+        # are silently rejected with MOT_NotHomed otherwise
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if all(self._status(p) & _STATUS_HOMED for p in (1, 2, 3)):
+                break
+            time.sleep(0.2)
 
         self.angles = [0.0, 0.0, 0.0]
         self._closed = False
@@ -82,6 +90,8 @@ class polMotors:  # max travel 160°
         L.MPC_StopPolling.restype         = None
         L.MPC_ClearMessageQueue.argtypes  = [ctypes.c_char_p]
         L.MPC_ClearMessageQueue.restype   = None
+        L.MPC_LoadSettings.argtypes       = [ctypes.c_char_p]
+        L.MPC_LoadSettings.restype        = ctypes.c_bool
         L.MPC_SetEnabledPaddles.argtypes  = [ctypes.c_char_p, ctypes.c_short]
         L.MPC_SetEnabledPaddles.restype   = ctypes.c_short
         L.MPC_Home.argtypes               = [ctypes.c_char_p, ctypes.c_short]
