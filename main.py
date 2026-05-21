@@ -596,13 +596,13 @@ class HolographyApp:
             emit(f"✗ Laser — {_friendly_error(e)}", "WARN")
             emit(f"  raw: {type(e).__name__}: {str(e).splitlines()[0][:200]}", "DEBUG")
             try:
-                import pyvisa
-                res = pyvisa.ResourceManager().list_resources()
+                from HPTunableLaserSource import _make_resource_manager
+                res = _make_resource_manager().list_resources()
                 if res:
                     emit(f"  Visible VISA resources: {', '.join(res)}", "INFO")
                 else:
                     emit("  No VISA resources visible — adapter driver isn't loaded "
-                         "(install NI-488.2 from ni.com)", "WARN")
+                         "(install NI-488.2 or Keysight IO Libraries)", "WARN")
             except Exception as e2:
                 emit(f"  VISA enumeration failed: {type(e2).__name__}: {e2}", "DEBUG")
             _fail.append("Laser")
