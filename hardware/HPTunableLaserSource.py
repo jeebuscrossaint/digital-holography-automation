@@ -1,130 +1,141 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Thu Nov 11 20:37:56 2021
-
-@author: ca109683
-"""
-
-#import ivi
 import pyvisa as visa
-import matplotlib.pyplot as plt
-import numpy as np
 import time
+
+# HP 8168E wavelength range (nm)
+_WL_MIN = 1475.0
+_WL_MAX = 1575.0
 
 
 class HPTunableLaserSource:
-    def __init__(self, TLName = 'GPIB0::24::INSTR'):
+    def __init__(self, TLName='GPIB0::24::INSTR'):
         rm = visa.ResourceManager()
         print(rm.list_resources())
         try:
             self.TL = rm.open_resource(TLName)
         except Exception:
-            # Resource may have been left open from a previous session — close and retry
             try:
                 rm.open_resource(TLName).close()
             except Exception:
                 pass
             self.TL = rm.open_resource(TLName)
-        
-    def outputState(self,tf):  #1 is on, 0 is off
-        if tf:
-            self.TL.write(":OUTP:STAT 1")
-        else:
-            self.TL.write(":OUTP:STAT 0")
-                
+
+        self.TL.timeout = 15000
+        self.TL.read_termination = '\n'
+        self.TL.write_termination = '\n'
+
+    # --- output ---
+
+    def outputState(self, tf):
+        self.TL.write(f":SOUR:POW:STAT {'ON' if tf else 'OFF'}")
+
     def isOutputOn(self):
-        return self.TL.query(":OUTP:STAT?") 
+        return self.TL.query(":SOUR:POW:STAT?").strip()
 
-    def powerAmplitude(self,num): #number may be in from -10dBm to -4dBm or 100uW to 398uW.  Alt, use MIN, DEF, MAX
-    #assign units as DBM, DBMW, PW, NW, UW, MW, or W
-        self.TL.write(":POW " + str(num))
-    
-    def checkPowerAmplitude(self,string = ''): #string = MIN, MAX, DEF will return min power, max power, or default
-        return(self.TL.query(":POW? " + str(string)))
-    
-    def changePowerUnit(self,string):
-        self.TL.write(":POW:UNIT " + str(string))
-        
+    # --- power ---
+
+    def powerAmplitude(self, num):
+        """Set output power. num in dBm (e.g. -10.0) or as string 'MIN'/'MAX'/'DEF'."""
+        self.TL.write(f":SOUR:POW:LEV:IMM:AMPL {num}DBM")
+
+    def checkPowerAmplitude(self, string=''):
+        return self.TL.query(f":SOUR:POW:LEV:IMM:AMPL? {string}").strip()
+
+    def changePowerUnit(self, string):
+        self.TL.write(f":POW:UNIT {string}")
+
     def checkPowerUnit(self):
-        return(self.TL.query(":POW:UNIT?"))
-    
-    def changeWavelength(self,num):# also work swith MIN, MAX, DEF, in our case the 8168E machine is 1475, 1575, 1540 nm
-        self.TL.write(":WAVE " + str(num))
-    
-    def checkWavelength(self,string = ''): #can work with MIN, MAX, DEF
-        return(self.TL.query(":WAVE? " + str(string)))
-    
-    def checkWavelengthReference(self):
-        return(self.TL.query(":WAVE:REF?"))
-    
-    def setReferenceWavelength(self): #sets reference wavelength to current wavelength
-        self.TL.write("WAVE:REF:DISP")
-        
+        return self.TL.query(":POW:UNIT?").strip()
 
-        #less useful functions down here
-            
-        
-    def displayEnable(self,tF): #1 is on, 0 is off
-        if tF:
-            self.TL.write(":DISP:ENAB 1")
+    # --- wavelength ---
+
+    def changeWavelength(self, nm):
+        """Set wavelength in nm (1475–1575). Accepts float, int, or 'MIN'/'MAX'/'DEF'."""
+        if isinstance(nm, (int, float)):
+            if not (_WL_MIN <= nm <= _WL_MAX):
+                raise ValueError(f"Wavelength {nm} nm out of range [{_WL_MIN}, {_WL_MAX}]")
+            self.TL.write(f":SOUR:WAV {nm:.4f}NM")
         else:
-            self.TL.write(":DISP:ENAB 0")
-    
+            self.TL.write(f":SOUR:WAV {nm}")
+
+    def checkWavelength(self, string=''):
+        """Return current wavelength in nm."""
+        raw = self.TL.query(f":SOUR:WAV? {string}").strip()
+        try:
+            return float(raw) * 1e9  # instrument returns meters
+        except ValueError:
+            return raw
+
+    def checkWavelengthReference(self):
+        return self.TL.query(":WAVE:REF?").strip()
+
+    def setReferenceWavelength(self):
+        self.TL.write("WAVE:REF:DISP")
+
+    # --- coherence control ---
+
+    def coherenceControl(self, tf):
+        """Enable/disable coherence control (reduces linewidth)."""
+        self.TL.write(f":SOUR:COHE:CONT {'ON' if tf else 'OFF'}")
+
+    def checkCoherenceControl(self):
+        return self.TL.query(":SOUR:COHE:CONT?").strip()
+
+    # --- modulation ---
+
+    def setAmplitudeFrequency(self, freq):
+        self.TL.write(f":SOUR:AM:INT:FREQ {freq}")
+
+    def whatAmplitudeFrequency(self):
+        return self.TL.query(":SOUR:AM:INT:FREQ?").strip()
+
+    def typeOfModulation(self, num):
+        """0=internal, 1=coherent control, 2=external."""
+        self.TL.write(f":SOUR:AM:SOUR {num}")
+
+    def whatTypeOfModulation(self):
+        return self.TL.query(":SOUR:AM:SOUR?").strip()
+
+    def modulationState(self, tf):
+        self.TL.write(f":SOUR:AM:STAT {'1' if tf else '0'}")
+
+    def modulationType(self, tf):
+        """False=constant, True=low while changing."""
+        self.TL.write(f":SOURCE:MODOUT {'0' if tf else '1'}")
+
+    # --- frequency offset ---
+
+    def setFrequencyOffset(self, num):
+        self.TL.write(f"WAVE:FREQ {num}")
+
+    def checkFrequencyOffset(self):
+        return self.TL.query(":WAVE:FREQ?").strip()
+
+    # --- display ---
+
+    def displayEnable(self, tf):
+        self.TL.write(f":DISP:ENAB {'1' if tf else '0'}")
+
     def isDisplayOn(self):
-        return self.TL.query(":DISP:ENAB?")
-        
+        return self.TL.query(":DISP:ENAB?").strip()
+
+    # --- misc ---
+
     def clearStatus(self):
         self.TL.write("*CLS")
-            
-    def setAmplitudeFrequency(self,freq): #set between 250Hz and 300kHz
-        self.TL.write(":SOUR:AM:INT:FREQ " + str(freq))
-            
-    def whatAmplitudeFrequeny(self):
-        return self.TL.query(":SOUR:AM:INT:FREQ?")
-    
-    def typeOfModulation(self,num): #0 for internal modulation, 1 coherent control, 2 external modulation
-        self.TL.write(":SOUR:AM:SOUR " + str(num))
-        
-    def whatTypeOfModulation(self): #0 for internal modulation, 1 coherent control, 2 external modulation
-        return self.TL.query(":SOUR:AM:SOUR?")
-    
-    def modulationState(self,tf): # 0 for modulatin off, 1 for modulation on
-        if tf:
-            self.TL.write(":SOUR:AM:STAT 1")
-        else:
-            self.TL.write(":SOUR:AM:STAT 0")
-            
-    def modulationType(self,tf): #0 for constant modulation, 1 for low when signal is being changed
-        if tf:
-            self.TL.write(":SOURCE:MODOUT 0")
-        else:
-           self. TL.write(":SOURCE:MODOUT 1")
-    
-    def setFrequencyOffset(self, num):#set in HZ, megahertz I think is spelled MAHZ for some reason
-        self.TL.write("WAVE:FREQ " + str(num))
-    
-    def checkFrequenyOffset(self):
-        return(self.TL.query(":WAVE:FREQ?"))
-    
-    def checkLaserCondition(self): #bit 8 is 1 when output power is larger than laser can produce, bit9 is 1 during power up
-        return(":STAT:OPER:COND?")
-    
+
+    def checkLaserCondition(self):
+        """Bit 8: output power exceeded; Bit 9: powering up."""
+        return self.TL.query(":STAT:OPER:COND?").strip()
+
+    def identify(self):
+        return self.TL.query("*IDN?").strip()
+
     def closeConnection(self):
         self.TL.close()
-        
-    def __del__(self): #idk if this works how I expect
+
+    def __del__(self):
         try:
             self.TL.close()
-            print("Serial connection closed in __del__")
-        except:
+        except Exception:
             pass
-
-
-#%%ask TL for outputs
-
-# ID = TL.query("*IDN?")
-# outputState(True)
-# print(ID)
-
-
-
