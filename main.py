@@ -10,7 +10,7 @@ import threading
 import queue
 import time
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, font as tkfont
 from pathlib import Path
 from datetime import datetime
 
@@ -34,30 +34,35 @@ for p in (str(SCRIPT_DIR / "hardware"), str(SCRIPT_DIR / "lib")):
 
 CONFIG_FILE = str(SCRIPT_DIR / "experiment_config.yaml")
 
-# ── Theme (Catppuccin Mocha) ─────────────────────────────────────────────────
-BG      = "#1e1e2e"
-PANEL   = "#313244"
-FG      = "#cdd6f4"
-GREEN   = "#a6e3a1"
-RED     = "#f38ba8"
-YELLOW  = "#f9e2af"
-BLUE    = "#89b4fa"
-MAUVE   = "#cba6f7"
-SURFACE = "#45475a"
+# ── Windows 11 Fluent colors (used for status indicators + log) ──────────────
+# Theme itself (backgrounds, buttons, tabs, etc.) comes from sv-ttk.
+
+ACCENT_GREEN  = "#16C60C"   # Windows accent: success
+ACCENT_AMBER  = "#FFB900"   # Windows accent: caution
+ACCENT_RED    = "#E81123"   # Windows accent: danger
+ACCENT_BLUE   = "#0078D4"   # Windows accent: info
+MUTED         = "#888888"
 
 HW_STATUS_COLOR = {
-    "connected":    GREEN,
-    "disconnected": RED,
-    "connecting":   YELLOW,
-    "error":        RED,
+    "connected":    ACCENT_GREEN,
+    "disconnected": MUTED,
+    "connecting":   ACCENT_AMBER,
+    "error":        ACCENT_RED,
+}
+
+HW_STATUS_TEXT = {
+    "connected":    "Online",
+    "disconnected": "Offline",
+    "connecting":   "Connecting…",
+    "error":        "Error",
 }
 
 LOG_TAG_COLOR = {
-    "INFO":  FG,
-    "OK":    GREEN,
-    "WARN":  YELLOW,
-    "ERROR": RED,
-    "DEBUG": "#6c7086",
+    "INFO":  None,             # default theme foreground
+    "OK":    ACCENT_GREEN,
+    "WARN":  ACCENT_AMBER,
+    "ERROR": ACCENT_RED,
+    "DEBUG": MUTED,
 }
 
 
@@ -90,9 +95,9 @@ def _friendly_error(e: Exception) -> str:
 class HolographyApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("UCF CREOL | Photonic Lantern Holography Control")
-        self.root.geometry("1300x880")
-        self.root.configure(bg=BG)
+        self.root.title("Photonic Lantern Holography")
+        self.root.geometry("1320x880")
+        self.root.minsize(1100, 720)
 
         self.hardware_connected = False
         self.experiment_running = False
@@ -105,7 +110,7 @@ class HolographyApp:
         self.motors = None
         self.config = self._load_config()
 
-        self._setup_styles()
+        self._setup_theme()
         self._build_ui()
         self._poll_queue()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -120,54 +125,57 @@ class HolographyApp:
         except Exception:
             return {}
 
-    # ── Styles ────────────────────────────────────────────────────────────────
+    # ── Theme + fonts ─────────────────────────────────────────────────────────
 
-    def _setup_styles(self):
+    def _setup_theme(self):
+        # Sun Valley (Windows 11 Fluent) — affects ttk widgets globally
+        try:
+            import sv_ttk
+            sv_ttk.set_theme("dark")
+        except Exception:
+            pass  # falls back to default theme; app still works
+
+        families = set(tkfont.families(self.root))
+        body    = "Segoe UI Variable Text"    if "Segoe UI Variable Text"    in families else "Segoe UI"
+        display = "Segoe UI Variable Display" if "Segoe UI Variable Display" in families else "Segoe UI"
+        small   = "Segoe UI Variable Small"   if "Segoe UI Variable Small"   in families else "Segoe UI"
+        mono    = "Cascadia Mono"             if "Cascadia Mono"             in families else "Consolas"
+
+        self._font_body    = (body,    10)
+        self._font_body_bold = (body,  10, "bold")
+        self._font_section = (body,    11, "bold")
+        self._font_title   = (display, 18)
+        self._font_subtitle = (display, 11)
+        self._font_metric  = (display, 13)
+        self._font_small   = (small,    9)
+        self._font_mono    = (mono,     9)
+
+        self.root.option_add("*Font", f"{{{body}}} 10")
+
+        # The Treeview heading font isn't picked up from option_add — set explicitly
         s = ttk.Style()
-        s.theme_use("clam")
-        s.configure(".",            background=BG,    foreground=FG,  font=("Helvetica", 10))
-        s.configure("TFrame",       background=BG)
-        s.configure("TLabel",       background=BG,    foreground=FG)
-        s.configure("TButton",      background=SURFACE, foreground=FG, borderwidth=0, padding=6)
-        s.map("TButton",            background=[("active", BLUE), ("disabled", SURFACE)],
-                                    foreground=[("active", BG), ("disabled", "#6c7086")])
-        s.configure("Accent.TButton", background=BLUE, foreground=BG)
-        s.map("Accent.TButton",     background=[("active", MAUVE)])
-        s.configure("Stop.TButton", background=RED,  foreground=BG)
-        s.map("Stop.TButton",       background=[("active", "#eba0ac")])
-        s.configure("TNotebook",    background=BG, tabmargins=[2, 5, 2, 0])
-        s.configure("TNotebook.Tab", background=PANEL, foreground=FG, padding=[12, 5])
-        s.map("TNotebook.Tab",       background=[("selected", BLUE)],
-                                     foreground=[("selected", BG)])
-        s.configure("TProgressbar", troughcolor=PANEL, background=GREEN, thickness=18)
-        s.configure("TEntry",        fieldbackground=PANEL, foreground=FG, insertcolor=FG)
-        s.configure("TRadiobutton",  background=BG,    foreground=FG)
-        s.configure("Panel.TFrame",  background=PANEL)
-        s.configure("Panel.TLabel",  background=PANEL, foreground=FG)
-        s.configure("Treeview",      background=PANEL, foreground=FG,
-                                     fieldbackground=PANEL, rowheight=22)
-        s.configure("Treeview.Heading", background=SURFACE, foreground=FG,
-                                        font=("Helvetica", 10, "bold"))
-        s.map("Treeview",            background=[("selected", BLUE)])
-        s.configure("TSeparator",    background=SURFACE)
-        s.configure("TScrollbar",    background=SURFACE, troughcolor=PANEL)
+        s.configure("Treeview",          rowheight=26, font=self._font_body)
+        s.configure("Treeview.Heading",  font=self._font_body_bold)
+        # Reserve a card-ish frame style for grouped sections
+        s.configure("Card.TFrame")  # sv-ttk already styles ttk.Frame nicely
 
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Title
+        # Title row
         title_row = ttk.Frame(self.root)
-        title_row.pack(fill="x", padx=14, pady=(10, 4))
-        ttk.Label(title_row,
-                  text="UCF CREOL — Photonic Lantern Digital Holography",
-                  font=("Helvetica", 15, "bold"), foreground=BLUE).pack(side="left")
-        ttk.Label(title_row, text="python main.py",
-                  font=("Consolas", 9), foreground="#6c7086").pack(side="right")
+        title_row.pack(fill="x", padx=18, pady=(14, 4))
+        ttk.Label(title_row, text="Photonic Lantern Holography",
+                  font=self._font_title).pack(side="left")
+        ttk.Label(title_row, text="UCF CREOL  ·  python main.py",
+                  font=self._font_small, foreground=MUTED).pack(side="right")
+
+        ttk.Separator(self.root, orient="horizontal").pack(fill="x", padx=18, pady=(2, 8))
 
         self._build_hw_bar()
 
         main = ttk.Frame(self.root)
-        main.pack(fill="both", expand=True, padx=14, pady=6)
+        main.pack(fill="both", expand=True, padx=18, pady=(2, 12))
 
         self.notebook = ttk.Notebook(main)
         self.notebook.pack(side="left", fill="both", expand=True)
@@ -181,127 +189,136 @@ class HolographyApp:
     # ── Hardware bar ──────────────────────────────────────────────────────────
 
     def _build_hw_bar(self):
-        bar = tk.Frame(self.root, bg=PANEL, pady=6)
-        bar.pack(fill="x", padx=14, pady=(0, 4))
+        bar = ttk.Frame(self.root)
+        bar.pack(fill="x", padx=18, pady=(0, 10))
 
-        tk.Label(bar, text="Hardware:", bg=PANEL, fg=FG,
-                 font=("Helvetica", 10, "bold")).pack(side="left", padx=12)
+        ttk.Label(bar, text="Hardware", font=self._font_section).pack(side="left", padx=(0, 18))
 
-        self._hw_dots: dict = {}
+        self._hw_dots: dict        = {}
+        self._hw_status_labels: dict = {}
+
         for name in ("Laser", "Camera", "Switch", "Motors"):
-            f = tk.Frame(bar, bg=PANEL)
-            f.pack(side="left", padx=16)
-            dot = tk.Label(f, text="●", bg=PANEL, fg=RED, font=("Helvetica", 14))
+            cell = ttk.Frame(bar)
+            cell.pack(side="left", padx=10)
+            dot = ttk.Label(cell, text="●", foreground=MUTED, font=(self._font_body[0], 12))
             dot.pack(side="left")
-            tk.Label(f, text=f" {name}", bg=PANEL, fg=FG).pack(side="left")
-            self._hw_dots[name.lower()] = dot
+            ttk.Label(cell, text=f"  {name}", font=self._font_body_bold).pack(side="left")
+            status = ttk.Label(cell, text="  Offline", foreground=MUTED, font=self._font_small)
+            status.pack(side="left")
+            self._hw_dots[name.lower()]          = dot
+            self._hw_status_labels[name.lower()] = status
 
-        btn_row = tk.Frame(bar, bg=PANEL)
-        btn_row.pack(side="right", padx=12)
-
+        btn_row = ttk.Frame(bar)
+        btn_row.pack(side="right")
         self._connect_btn = ttk.Button(btn_row, text="Connect All",
                                        style="Accent.TButton",
                                        command=self._connect_hardware)
-        self._connect_btn.pack(side="left", padx=4)
-
+        self._connect_btn.pack(side="left", padx=(0, 6))
         self._disconnect_btn = ttk.Button(btn_row, text="Disconnect",
                                           command=self._disconnect_hardware,
                                           state="disabled")
-        self._disconnect_btn.pack(side="left", padx=4)
+        self._disconnect_btn.pack(side="left")
 
     # ── Run tab ───────────────────────────────────────────────────────────────
 
     def _build_run_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="  Run Experiment  ")
+        tab = ttk.Frame(self.notebook, padding=14)
+        self.notebook.add(tab, text="Run Experiment")
 
-        # Mode + controls
-        ctrl = tk.Frame(tab, bg=PANEL, pady=8)
-        ctrl.pack(fill="x", padx=6, pady=(6, 3))
+        # Row 1 — mode selector + run controls
+        ctrl = ttk.Frame(tab)
+        ctrl.pack(fill="x", pady=(0, 12))
 
-        tk.Label(ctrl, text="Mode:", bg=PANEL, fg=FG).pack(side="left", padx=(12, 6))
+        ttk.Label(ctrl, text="Mode", font=self._font_body_bold).pack(side="left", padx=(0, 12))
         self._run_mode = tk.StringVar(value="full")
         for label, val in (("Collect", "collect"), ("Process", "process"), ("Full Run", "full")):
-            tk.Radiobutton(ctrl, text=label, variable=self._run_mode, value=val,
-                           bg=PANEL, fg=FG, selectcolor=SURFACE,
-                           activebackground=PANEL, activeforeground=FG).pack(side="left", padx=8)
+            ttk.Radiobutton(ctrl, text=label, variable=self._run_mode,
+                            value=val).pack(side="left", padx=8)
 
-        self._stop_btn = ttk.Button(ctrl, text="■  STOP",
-                                    style="Stop.TButton",
-                                    command=self._stop_experiment,
-                                    state="disabled")
-        self._stop_btn.pack(side="right", padx=(6, 12))
-
-        self._start_btn = ttk.Button(ctrl, text="▶  START",
+        self._stop_btn = ttk.Button(ctrl, text="Stop",
+                                    command=self._stop_experiment, state="disabled")
+        self._stop_btn.pack(side="right", padx=(6, 0))
+        self._start_btn = ttk.Button(ctrl, text="Start Experiment",
                                      style="Accent.TButton",
-                                     command=self._start_experiment,
-                                     state="disabled")
-        self._start_btn.pack(side="right", padx=4)
+                                     command=self._start_experiment, state="disabled")
+        self._start_btn.pack(side="right")
 
-        # Progress
-        prog = tk.Frame(tab, bg=PANEL, pady=6)
-        prog.pack(fill="x", padx=6, pady=3)
+        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=(0, 10))
 
+        # Row 2 — progress
+        ttk.Label(tab, text="Progress", font=self._font_section).pack(anchor="w")
         self._progress_var = tk.DoubleVar(value=0)
-        ttk.Progressbar(prog, variable=self._progress_var,
-                         maximum=100).pack(fill="x", padx=12, pady=(4, 2))
+        ttk.Progressbar(tab, variable=self._progress_var,
+                        maximum=100).pack(fill="x", pady=(6, 4))
 
         self._status_var = tk.StringVar(value="Connect hardware to begin")
-        tk.Label(prog, textvariable=self._status_var,
-                 bg=PANEL, fg=FG, font=("Helvetica", 10)).pack(anchor="w", padx=12)
+        ttk.Label(tab, textvariable=self._status_var,
+                  font=self._font_body).pack(anchor="w", pady=(0, 6))
 
-        detail = tk.Frame(prog, bg=PANEL)
-        detail.pack(fill="x", padx=12, pady=(3, 6))
-        self._leg_var    = tk.StringVar(value="Leg: —")
-        self._wl_var     = tk.StringVar(value="λ: —")
-        self._acq_var    = tk.StringVar(value="Images: 0/0")
-        self._fringe_var = tk.StringVar(value="Fringe: —")
-        for v in (self._leg_var, self._wl_var, self._acq_var, self._fringe_var):
-            tk.Label(detail, textvariable=v, bg=PANEL, fg="#a6adc8",
-                     font=("Helvetica", 9)).pack(side="left", padx=14)
+        # Metric strip
+        metrics = ttk.Frame(tab)
+        metrics.pack(fill="x", pady=(0, 14))
+        self._leg_var    = tk.StringVar(value="—")
+        self._wl_var     = tk.StringVar(value="—")
+        self._acq_var    = tk.StringVar(value="0 / 0")
+        self._fringe_var = tk.StringVar(value="—")
+
+        for col, (label, var) in enumerate((
+            ("Leg",        self._leg_var),
+            ("Wavelength", self._wl_var),
+            ("Images",     self._acq_var),
+            ("Fringe",     self._fringe_var),
+        )):
+            cell = ttk.Frame(metrics)
+            cell.grid(row=0, column=col, sticky="w", padx=(0, 32))
+            ttk.Label(cell, text=label.upper(), font=self._font_small,
+                      foreground=MUTED).pack(anchor="w")
+            ttk.Label(cell, textvariable=var, font=self._font_metric).pack(anchor="w")
 
         # Camera preview
+        ttk.Label(tab, text="Camera Preview",
+                  font=self._font_section).pack(anchor="w", pady=(2, 6))
         preview = ttk.Frame(tab)
-        preview.pack(fill="both", expand=True, padx=6, pady=6)
-        ttk.Label(preview, text="Camera Preview",
-                  font=("Helvetica", 10, "bold")).pack(anchor="w", padx=4)
+        preview.pack(fill="both", expand=True)
 
-        self._canvas = tk.Canvas(preview, bg="black", highlightthickness=0)
+        self._canvas = tk.Canvas(preview, bg="#0a0a0a", highlightthickness=1,
+                                 highlightbackground="#3a3a3a")
         self._canvas.pack(fill="both", expand=True)
         self._canvas_photo = None
         self._last_frame   = None
         self._canvas.bind("<Configure>", lambda _e: self._redraw_frame())
-        self._canvas.create_text(200, 120, text="No Signal",
-                                  fill="#6c7086", font=("Helvetica", 14),
-                                  tags="nosignal")
+        self._canvas.create_text(220, 120, text="No signal",
+                                 fill=MUTED, font=self._font_metric, tags="nosignal")
 
     # ── Config tab ────────────────────────────────────────────────────────────
 
     def _build_config_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="  Configuration  ")
+        tab = ttk.Frame(self.notebook, padding=(2, 4))
+        self.notebook.add(tab, text="Configuration")
 
-        outer = tk.Canvas(tab, bg=BG, highlightthickness=0)
+        # Scrollable container — Canvas + inner Frame
+        outer = tk.Canvas(tab, highlightthickness=0, background="#1c1c1c")
         vsb   = ttk.Scrollbar(tab, orient="vertical", command=outer.yview)
         outer.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         outer.pack(side="left", fill="both", expand=True)
 
-        inner = ttk.Frame(outer)
+        inner = ttk.Frame(outer, padding=14)
         inner.bind("<Configure>",
                    lambda e: outer.configure(scrollregion=outer.bbox("all")))
         outer.create_window((0, 0), window=inner, anchor="nw")
 
         self._cfg_vars: dict = {}
 
-        def section(title: str):
-            ttk.Label(inner, text=title, font=("Helvetica", 11, "bold"),
-                      foreground=BLUE).pack(anchor="w", padx=14, pady=(12, 2))
+        def section(title: str, pad_top: int = 14):
+            ttk.Label(inner, text=title, font=self._font_section).pack(
+                anchor="w", pady=(pad_top, 6))
 
         def field(label: str, key: str, default):
             row = ttk.Frame(inner)
-            row.pack(fill="x", padx=14, pady=2)
-            ttk.Label(row, text=label, width=34, anchor="w").pack(side="left")
+            row.pack(fill="x", pady=3)
+            ttk.Label(row, text=label, width=32, anchor="w",
+                      font=self._font_body).pack(side="left")
             var = tk.StringVar(value=str(default))
             ttk.Entry(row, textvariable=var, width=44).pack(side="left", padx=6)
             self._cfg_vars[key] = var
@@ -309,95 +326,108 @@ class HolographyApp:
         hw  = self.config.get("hardware", {})
         exp = self.config.get("experiment", {})
 
-        section("Hardware")
-        field("Laser GPIB Address",       "hardware.laser.gpib_address",
+        section("Hardware", pad_top=0)
+        field("Laser GPIB address",          "hardware.laser.gpib_address",
               hw.get("laser", {}).get("gpib_address", "GPIB0::24::INSTR"))
-        field("Laser Power (µW)",          "hardware.laser.power_uw",
+        field("Laser power (µW)",            "hardware.laser.power_uw",
               hw.get("laser", {}).get("power_uw", 208))
-        field("Camera URL",                "hardware.camera.url",
+        field("Camera URL",                  "hardware.camera.url",
               hw.get("camera", {}).get("url", "cam://0"))
-        field("Camera Exposure (µs)",      "hardware.camera.exposure_time",
+        field("Camera exposure (µs)",        "hardware.camera.exposure_time",
               hw.get("camera", {}).get("exposure_time", 500))
-        field("Fiber Switch COM Port",     "hardware.fiber_switch.port",
+        field("Fiber switch COM port",       "hardware.fiber_switch.port",
               hw.get("fiber_switch", {}).get("port", "COM6"))
-        field("Motor Serial Number",       "hardware.polarization_motors.serial_number",
+        field("Motor serial number",         "hardware.polarization_motors.serial_number",
               hw.get("polarization_motors", {}).get("serial_number", "38394984"))
 
-        ttk.Separator(inner, orient="horizontal").pack(fill="x", padx=14, pady=6)
         section("Experiment")
         legs = exp.get("legs", list(range(1, 8)))
-        field("Legs (comma-separated)",       "experiment.legs",
+        field("Legs",                        "experiment.legs",
               ",".join(map(str, legs)))
         wls = exp.get("wavelengths", [1540, 1545, 1550, 1555, 1560, 1565, 1570])
-        field("Wavelengths nm (comma-sep)",   "experiment.wavelengths",
+        field("Wavelengths (nm)",            "experiment.wavelengths",
               ",".join(map(str, wls)))
         wt = exp.get("wait_times", {})
-        field("Wait after leg switch (s)",    "experiment.wait_times.after_leg_switch",
+        field("Wait after leg switch (s)",   "experiment.wait_times.after_leg_switch",
               wt.get("after_leg_switch", 1.0))
-        field("Wait after wavelength (s)",    "experiment.wait_times.after_wavelength_change",
+        field("Wait after wavelength (s)",   "experiment.wait_times.after_wavelength_change",
               wt.get("after_wavelength_change", 0.5))
         fd = exp.get("fringe_detection", {})
-        field("Min fringe visibility",        "experiment.fringe_detection.min_visibility",
+        field("Min fringe visibility",       "experiment.fringe_detection.min_visibility",
               fd.get("min_visibility", 0.15))
-        field("Max polarization attempts",    "experiment.fringe_detection.max_attempts",
+        field("Max polarization attempts",   "experiment.fringe_detection.max_attempts",
               fd.get("max_attempts", 5))
 
-        ttk.Separator(inner, orient="horizontal").pack(fill="x", padx=14, pady=6)
         section("Output")
-        field("Data output directory",        "data.output_dir",
+        field("Data output directory",       "data.output_dir",
               self.config.get("data", {}).get("output_dir", "./holography_data"))
 
-        ttk.Button(inner, text="Save Configuration",
-                   command=self._save_config).pack(padx=14, pady=12, anchor="w")
+        ttk.Button(inner, text="Save configuration", style="Accent.TButton",
+                   command=self._save_config).pack(anchor="w", pady=(16, 4))
 
     # ── Results tab ───────────────────────────────────────────────────────────
 
     def _build_results_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="  Results  ")
+        tab = ttk.Frame(self.notebook, padding=14)
+        self.notebook.add(tab, text="Results")
 
         btn_row = ttk.Frame(tab)
-        btn_row.pack(fill="x", padx=10, pady=6)
-        ttk.Button(btn_row, text="Open Data Folder",
-                   command=self._open_data_folder).pack(side="left", padx=4)
+        btn_row.pack(fill="x", pady=(0, 10))
+        ttk.Button(btn_row, text="Open data folder",
+                   command=self._open_data_folder).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="Refresh",
-                   command=self._refresh_results).pack(side="left", padx=4)
+                   command=self._refresh_results).pack(side="left")
+
+        body = ttk.Frame(tab)
+        body.pack(fill="both", expand=True)
 
         cols = ("file", "fidelity", "mode_powers")
-        self._results_tree = ttk.Treeview(tab, columns=cols, show="headings", height=24)
-        self._results_tree.heading("file",        text="Hologram File")
+        self._results_tree = ttk.Treeview(body, columns=cols, show="headings", height=24)
+        self._results_tree.heading("file",        text="Hologram")
         self._results_tree.heading("fidelity",    text="Fidelity")
-        self._results_tree.heading("mode_powers", text="Mode Powers (LP01 → LP06)")
-        self._results_tree.column("file",        width=220)
-        self._results_tree.column("fidelity",    width=80)
-        self._results_tree.column("mode_powers", width=380)
+        self._results_tree.heading("mode_powers", text="Mode powers (LP01 → LP06)")
+        self._results_tree.column("file",        width=240)
+        self._results_tree.column("fidelity",    width=90, anchor="e")
+        self._results_tree.column("mode_powers", width=400)
 
-        vsb = ttk.Scrollbar(tab, orient="vertical", command=self._results_tree.yview)
+        vsb = ttk.Scrollbar(body, orient="vertical", command=self._results_tree.yview)
         self._results_tree.configure(yscrollcommand=vsb.set)
-        self._results_tree.pack(side="left", fill="both", expand=True,
-                                padx=(10, 0), pady=4)
-        vsb.pack(side="right", fill="y", pady=4, padx=(0, 10))
+        self._results_tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
 
     # ── Log panel ─────────────────────────────────────────────────────────────
 
     def _build_log_panel(self, parent):
-        pane = ttk.Frame(parent)
-        pane.pack(side="right", fill="both", padx=(8, 0))
+        pane = ttk.Frame(parent, padding=(14, 0, 0, 0))
+        pane.pack(side="right", fill="both")
 
         hdr = ttk.Frame(pane)
-        hdr.pack(fill="x")
-        ttk.Label(hdr, text="Log", font=("Helvetica", 10, "bold")).pack(side="left", padx=4)
-        ttk.Button(hdr, text="Clear", command=self._clear_log).pack(side="right")
+        hdr.pack(fill="x", pady=(0, 6))
+        ttk.Label(hdr, text="Activity",
+                  font=self._font_section).pack(side="left")
+        ttk.Button(hdr, text="Clear",
+                   command=self._clear_log).pack(side="right")
+
+        # ScrolledText is plain tk — pick a bg that matches the theme
+        log_bg = "#1a1a1a"   # sits a touch darker than sv-ttk dark background
+        log_fg = "#e6e6e6"
 
         self._log_widget = scrolledtext.ScrolledText(
-            pane, width=46, bg="#11111b", fg=FG,
-            font=("Consolas", 9), state="disabled", wrap="word",
-            insertbackground=FG,
+            pane, width=48, height=10,
+            bg=log_bg, fg=log_fg,
+            font=self._font_mono,
+            state="disabled", wrap="word",
+            insertbackground=log_fg,
+            relief="flat", borderwidth=0,
+            padx=10, pady=8,
         )
         self._log_widget.pack(fill="both", expand=True)
 
         for tag, color in LOG_TAG_COLOR.items():
-            self._log_widget.tag_config(tag, foreground=color)
+            if color:
+                self._log_widget.tag_config(tag, foreground=color)
+            else:
+                self._log_widget.tag_config(tag, foreground=log_fg)
 
     # ── Logging ───────────────────────────────────────────────────────────────
 
@@ -439,7 +469,11 @@ class HolographyApp:
     def _set_hw_dot(self, device: str, status: str):
         dot = self._hw_dots.get(device)
         if dot:
-            dot.configure(fg=HW_STATUS_COLOR.get(status, RED))
+            dot.configure(foreground=HW_STATUS_COLOR.get(status, MUTED))
+        label = self._hw_status_labels.get(device)
+        if label:
+            label.configure(text=f"  {HW_STATUS_TEXT.get(status, '—')}",
+                            foreground=HW_STATUS_COLOR.get(status, MUTED))
 
     # ── Progress updates ──────────────────────────────────────────────────────
 
@@ -475,10 +509,17 @@ class HolographyApp:
             cw = max(self._canvas.winfo_width(),  10)
             ch = max(self._canvas.winfo_height(), 10)
 
-            img   = Image.fromarray(arr, mode="L").resize((cw, ch), Image.LANCZOS)
+            # Fit image while preserving aspect ratio
+            ih, iw = arr.shape
+            scale = min(cw / iw, ch / ih)
+            tw, th = max(int(iw * scale), 1), max(int(ih * scale), 1)
+
+            img   = Image.fromarray(arr, mode="L").resize((tw, th), Image.LANCZOS)
             photo = ImageTk.PhotoImage(img)
             self._canvas.delete("nosignal")
-            self._canvas.create_image(0, 0, anchor="nw", image=photo)
+            self._canvas.delete("frame")
+            self._canvas.create_image(cw // 2, ch // 2, anchor="center",
+                                      image=photo, tags="frame")
             self._canvas_photo = photo  # prevent GC
         except Exception:
             pass

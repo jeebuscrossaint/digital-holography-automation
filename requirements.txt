@@ -24,6 +24,9 @@ gpib-ctypes>=0.3.0
 # Image processing (PIL for camera preview in GUI)
 Pillow>=8.0.0
 
+# Windows 11 Fluent theme for the tkinter GUI
+sv-ttk>=2.6.0
+
 # Xeneth camera SDK (must be installed separately)
 # Install after installing Xeneth software:
 # pip install "C:\Program Files\Xeneth\Sdk\Python\xenics-3.x.x-py3-none-any.whl"
