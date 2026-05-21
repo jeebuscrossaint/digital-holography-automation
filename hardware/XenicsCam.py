@@ -86,26 +86,41 @@ class xCam:
                 self.cam.start_capture()
             else:
                 print("Initialization failed")
-    
+
         except XenethAPIException as e:
             print(e.message)
+        self._closed = False
+
     def getFrame(self):
         if self.cam.get_frame(self.buffer, flags=XGetFrameFlags.XGF_Blocking):
             return self.buffer.image_data
-        
-    def stopCapture(self):
-        self.cam.stop_capture()
-        
-    def closeCamera(self):
-        self.cam.close()
 
-    def __del__(self): #idk if this works how I expect
-        if self.cam.is_capturing:
-            try:
-                print("Stop capturing")
+    def stopCapture(self):
+        if self._closed:
+            return
+        try:
+            if self.cam.is_capturing:
                 self.cam.stop_capture()
-                print("Close Camera")
-                self.cam.close()
-            except XenethAPIException as e:
-                print(e.message)
+        except Exception:
+            pass
+
+    def closeCamera(self):
+        if self._closed:
+            return
+        try:
+            if self.cam.is_capturing:
+                try:
+                    self.cam.stop_capture()
+                except Exception:
+                    pass
+            self.cam.close()
+        except Exception:
+            pass
+        self._closed = True
+
+    def __del__(self):
+        try:
+            self.closeCamera()
+        except Exception:
+            pass
                     

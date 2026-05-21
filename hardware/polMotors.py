@@ -1,55 +1,125 @@
 # -*- coding: utf-8 -*-
 import ctypes
+import os
 import time
 
 _DLL_PATH = r"C:\Program Files\Thorlabs\Kinesis\Thorlabs.MotionControl.Polarizer.dll"
 
-# Thorlabs MPC SDK paddle enum: each paddle is a single bit, not an index
+# Thorlabs MPC SDK: paddles are addressed by a single-bit mask, not by index
 _PADDLE_BITS = {1: 0x01, 2: 0x02, 3: 0x04}
 _ALL_PADDLES = 0x07
 
+# Status word bits we care about
+_STATUS_MOVING_CW  = 0x00000010   # bit 4
+_STATUS_MOVING_CCW = 0x00000020   # bit 5
+_STATUS_HOMING     = 0x00000200   # bit 9
+_STATUS_HOMED      = 0x00000400   # bit 10
+_BUSY_BITS         = _STATUS_MOVING_CW | _STATUS_MOVING_CCW | _STATUS_HOMING
 
-class polMotors:  # max travel for this is 160 deg
+
+def _check(name, code):
+    if code != 0:
+        raise RuntimeError(f"{name} returned Kinesis error code {code}")
+
+
+class polMotors:  # max travel 160°
     def __init__(self, serialNumber=b"38394984"):
+        # Let Windows find the Kinesis support DLLs next to the polarizer DLL
+        kinesis_dir = os.path.dirname(_DLL_PATH)
+        if os.path.isdir(kinesis_dir):
+            try:
+                os.add_dll_directory(kinesis_dir)
+            except (AttributeError, OSError):
+                pass
+            os.environ["PATH"] = kinesis_dir + os.pathsep + os.environ.get("PATH", "")
+
         self.lib = ctypes.cdll.LoadLibrary(_DLL_PATH)
+        self._setup_signatures()
         self.lib.TLI_BuildDeviceList()
-        serialNumber = ctypes.c_char_p(serialNumber)
 
-        self.lib.MPC_Open(serialNumber)
-        self.lib.MPC_StartPolling(serialNumber, ctypes.c_int(50))
-        self.lib.MPC_LoadSettings(serialNumber)
-        time.sleep(3)
-        self.lib.MPC_ClearMessageQueue(serialNumber)
-        self.lib.MPC_SetEnabledPaddles(serialNumber, ctypes.c_short(_ALL_PADDLES))
-        self.lib.MPC_GetMaxTravel.restype = ctypes.c_double
+        # Keep the bytes alive — ctypes auto-converts to c_char_p with argtypes set
+        self.serialNumber = (serialNumber if isinstance(serialNumber, bytes)
+                             else str(serialNumber).encode())
+
+        _check("MPC_Open", self.lib.MPC_Open(self.serialNumber))
+        self.lib.MPC_StartPolling(self.serialNumber, 200)
+        self.lib.MPC_ClearMessageQueue(self.serialNumber)
+        time.sleep(0.5)
+
+        _check("MPC_SetEnabledPaddles",
+               self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES))
+
         for paddle in (1, 2, 3):
-            self.lib.MPC_Home(serialNumber, ctypes.c_short(_PADDLE_BITS[paddle]))
-        self.lib.MPC_StartPolling(serialNumber, ctypes.c_int(200))
+            _check(f"MPC_Home paddle {paddle}",
+                   self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[paddle]))
 
-        self.serialNumber = serialNumber
-        self.angles = [0, 0, 0]
+        # Wait until every paddle reports homed (timeout 20 s) — moves are
+        # silently rejected with MOT_NotHomed otherwise
+        deadline = time.time() + 20
+        for paddle in (1, 2, 3):
+            while time.time() < deadline:
+                if self._status(paddle) & _STATUS_HOMED:
+                    break
+                time.sleep(0.1)
+
+        self.angles = [0.0, 0.0, 0.0]
         self._closed = False
 
+    def _setup_signatures(self):
+        """Tell ctypes the exact argument and return types for every call.
+        Without this, ctypes guesses (default int return, no argument
+        checking) and the x64 calling convention can mis-place the double
+        position argument."""
+        L = self.lib
+        L.TLI_BuildDeviceList.restype     = ctypes.c_short
+        L.MPC_Open.argtypes               = [ctypes.c_char_p]
+        L.MPC_Open.restype                = ctypes.c_short
+        L.MPC_Close.argtypes              = [ctypes.c_char_p]
+        L.MPC_Close.restype               = ctypes.c_short
+        L.MPC_StartPolling.argtypes       = [ctypes.c_char_p, ctypes.c_int]
+        L.MPC_StartPolling.restype        = ctypes.c_bool
+        L.MPC_StopPolling.argtypes        = [ctypes.c_char_p]
+        L.MPC_StopPolling.restype         = None
+        L.MPC_ClearMessageQueue.argtypes  = [ctypes.c_char_p]
+        L.MPC_ClearMessageQueue.restype   = None
+        L.MPC_SetEnabledPaddles.argtypes  = [ctypes.c_char_p, ctypes.c_short]
+        L.MPC_SetEnabledPaddles.restype   = ctypes.c_short
+        L.MPC_Home.argtypes               = [ctypes.c_char_p, ctypes.c_short]
+        L.MPC_Home.restype                = ctypes.c_short
+        L.MPC_MoveToPosition.argtypes     = [ctypes.c_char_p, ctypes.c_short, ctypes.c_double]
+        L.MPC_MoveToPosition.restype      = ctypes.c_short
+        L.MPC_GetPosition.argtypes        = [ctypes.c_char_p, ctypes.c_short]
+        L.MPC_GetPosition.restype         = ctypes.c_double
+        L.MPC_GetStatusBits.argtypes      = [ctypes.c_char_p, ctypes.c_short]
+        L.MPC_GetStatusBits.restype       = ctypes.c_uint
+        L.MPC_GetMaxTravel.argtypes       = [ctypes.c_char_p]
+        L.MPC_GetMaxTravel.restype        = ctypes.c_double
+
+    def _status(self, motNum):
+        return int(self.lib.MPC_GetStatusBits(self.serialNumber, _PADDLE_BITS[motNum]))
+
     def moveMotor(self, motNum, angle):
-        self.angles[motNum - 1] = float(angle)
-        self.lib.MPC_MoveToPosition(self.serialNumber,
-                                    ctypes.c_short(_PADDLE_BITS[motNum]),
-                                    ctypes.c_double(float(angle)))
+        angle = float(angle)
+        self.angles[motNum - 1] = angle
+        _check(f"MPC_MoveToPosition paddle {motNum} → {angle:.1f}°",
+               self.lib.MPC_MoveToPosition(self.serialNumber,
+                                           _PADDLE_BITS[motNum], angle))
 
     def getPosition(self, motNum):
-        self.lib.MPC_GetPosition.restype = ctypes.c_double
         return float(self.lib.MPC_GetPosition(self.serialNumber,
-                                              ctypes.c_short(_PADDLE_BITS[motNum])))
+                                              _PADDLE_BITS[motNum]))
 
     def homeMotor(self, motNum):
-        self.lib.MPC_Home(self.serialNumber, ctypes.c_short(_PADDLE_BITS[motNum]))
+        _check(f"MPC_Home paddle {motNum}",
+               self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[motNum]))
+
+    def isHomed(self, motNum):
+        return bool(self._status(motNum) & _STATUS_HOMED)
 
     def isBusy(self):
         time.sleep(0.01)
         for paddle in (1, 2, 3):
-            bits = self.lib.MPC_GetStatusBits(self.serialNumber,
-                                              ctypes.c_short(_PADDLE_BITS[paddle])) & 0xFF
-            if bits != 0:
+            if self._status(paddle) & _BUSY_BITS:
                 return True
         return False
 
