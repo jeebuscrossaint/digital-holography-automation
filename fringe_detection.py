@@ -146,7 +146,7 @@ def optimize_polarization_for_fringes(camera, pol_motors, max_attempts=10,
     
     attempt = 0
     # Try different combinations (limited to max_attempts)
-    for angle1, angle2 in itertools.product(angles_to_try[:4], angles_to_try[:4]):
+    for angle1, angle2 in itertools.product(angles_to_try, angles_to_try):
         if attempt >= max_attempts:
             break
             

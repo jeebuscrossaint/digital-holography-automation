@@ -108,6 +108,7 @@ class HolographyApp:
         self._setup_styles()
         self._build_ui()
         self._poll_queue()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Config ────────────────────────────────────────────────────────────────
 
@@ -591,9 +592,10 @@ class HolographyApp:
 
         self._log("Disconnecting hardware…", "INFO")
         for obj, method in [
-            (self.laser,  lambda: self.laser.outputState(False)),
+            (self.laser,  lambda: (self.laser.outputState(False), self.laser.closeConnection())),
             (self.camera, lambda: (self.camera.stopCapture(), self.camera.closeCamera())),
             (self.switch, lambda: self.switch.close()),
+            (self.motors, lambda: self.motors.close()),
         ]:
             if obj:
                 try: method()
@@ -609,6 +611,21 @@ class HolographyApp:
         self._start_btn.configure(state="disabled")
         self._status_var.set("Hardware disconnected")
         self._log("Hardware disconnected", "INFO")
+
+    def _on_close(self):
+        """Window close: stop experiment, disconnect hardware, then exit."""
+        if self.experiment_running:
+            self.stop_event.set()
+        for obj, method in [
+            (self.laser,  lambda: (self.laser.outputState(False), self.laser.closeConnection())),
+            (self.camera, lambda: (self.camera.stopCapture(), self.camera.closeCamera())),
+            (self.switch, lambda: self.switch.close()),
+            (self.motors, lambda: self.motors.close()),
+        ]:
+            if obj:
+                try: method()
+                except Exception: pass
+        self.root.destroy()
 
     # ── Experiment ────────────────────────────────────────────────────────────
 
@@ -673,6 +690,19 @@ class HolographyApp:
         module = cfg["hardware"]["fiber_switch"]["module"]
         total  = len(legs) * len(wls)
         n      = 0
+
+        if not self.camera:
+            cb({"type": "log",
+                "text": "Camera not connected — cannot collect.", "level": "ERROR"})
+            return
+        if not self.switch and len(legs) > 1:
+            cb({"type": "log",
+                "text": f"Switch not connected — all {len(legs)} legs will be saved at the current optical path.",
+                "level": "WARN"})
+        if not self.laser and len(wls) > 1:
+            cb({"type": "log",
+                "text": f"Laser not connected — all {len(wls)} wavelengths will be saved at the current λ.",
+                "level": "WARN"})
 
         cb({"type": "log",
             "text": f"Collection: {len(legs)} legs × {len(wls)} wavelengths = {total} images",
@@ -904,7 +934,7 @@ class HolographyApp:
             d[keys[-1]] = val
 
         with open(CONFIG_FILE, "w") as f:
-            yaml.dump(cfg, f, default_flow_style=False)
+            yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
 
         self.config = self._load_config()
         self._log("Configuration saved", "OK")
@@ -913,10 +943,12 @@ class HolographyApp:
     # ── Results ───────────────────────────────────────────────────────────────
 
     def _open_data_folder(self):
-        import subprocess
         d = Path(self.config.get("data", {}).get("output_dir", "./holography_data"))
-        d.mkdir(exist_ok=True)
-        subprocess.Popen(f'explorer "{d.absolute()}"')
+        d.mkdir(parents=True, exist_ok=True)
+        try:
+            os.startfile(str(d.absolute()))
+        except Exception as e:
+            self._log(f"Could not open folder: {e}", "WARN")
 
     def _refresh_results(self):
         import yaml

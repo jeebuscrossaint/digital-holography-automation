@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import pyvisa as visa
-import time
 
 # HP 8168E wavelength range (nm)
 _WL_MIN = 1475.0

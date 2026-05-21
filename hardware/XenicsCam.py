@@ -55,7 +55,7 @@ class xCam:
     def __init__(self, url=None):
         self.cam = XCamera()
         if not url:
-            url = dev_discover()
+            url = dev_discovery()
 
         # open camera and start capturing
         try:
