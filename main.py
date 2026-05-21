@@ -340,7 +340,17 @@ class HolographyApp:
         ttk.Label(tab, foreground=MUTED, font=self._font_small,
                   text="Three motorized paddles squeeze the fiber to tune polarization. "
                        "For holography you want signal and reference arms parallel — "
-                       "max fringes.").pack(anchor="w", pady=(0, 14))
+                       "max fringes.").pack(anchor="w", pady=(0, 10))
+
+        jog_row = ttk.Frame(tab)
+        jog_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(jog_row, text="Jog size",
+                  font=self._font_body).pack(side="left")
+        self._jog_size_var = tk.DoubleVar(value=1.0)
+        ttk.Spinbox(jog_row, from_=0.1, to=10.0, increment=0.5,
+                    textvariable=self._jog_size_var,
+                    width=6, format="%.1f").pack(side="left", padx=(8, 4))
+        ttk.Label(jog_row, text="°", foreground=MUTED).pack(side="left")
 
         self._paddle_cur_vars: dict    = {}
         self._paddle_target_vars: dict = {}
@@ -375,8 +385,12 @@ class HolographyApp:
                 lambda *_a, p=i: self._paddle_target_lbls[p].configure(
                     text=f"target {self._paddle_target_vars[p].get():.0f}°"))
 
+            ttk.Button(row, text="◀", width=3,
+                       command=lambda p=i: self._jog_paddle(p, -1)).pack(side="left", padx=(8, 2))
+            ttk.Button(row, text="▶", width=3,
+                       command=lambda p=i: self._jog_paddle(p, +1)).pack(side="left", padx=2)
             ttk.Button(row, text="Home", width=7,
-                       command=lambda p=i: self._home_paddle(p)).pack(side="left", padx=(8, 0))
+                       command=lambda p=i: self._home_paddle(p)).pack(side="left", padx=(6, 0))
 
         ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=14)
 
@@ -442,6 +456,26 @@ class HolographyApp:
 
     def _home_paddle(self, paddle: int):
         self._paddle_target_vars[paddle].set(0.0)
+        self._move_paddle(paddle)
+
+    def _jog_paddle(self, paddle: int, direction: int):
+        if not self.motors:
+            self._pol_status_var.set("Motors not connected.")
+            return
+        try:
+            step = float(self._jog_size_var.get())
+        except (tk.TclError, ValueError):
+            step = 1.0
+        # Jog from the actual hardware position if available so repeated
+        # clicks compound on the real angle, not on a stale slider value
+        try:
+            cur = (self.motors.getPosition(paddle)
+                   if hasattr(self.motors, "getPosition")
+                   else self.motors.angles[paddle - 1])
+        except Exception:
+            cur = float(self._paddle_target_vars[paddle].get())
+        new = max(0.0, min(160.0, cur + direction * step))
+        self._paddle_target_vars[paddle].set(new)
         self._move_paddle(paddle)
 
     def _home_all_paddles(self):
