@@ -9,7 +9,6 @@ _WL_MAX = 1575.0
 class HPTunableLaserSource:
     def __init__(self, TLName='GPIB0::24::INSTR'):
         rm = visa.ResourceManager()
-        print(rm.list_resources())
         try:
             self.TL = rm.open_resource(TLName)
         except Exception:

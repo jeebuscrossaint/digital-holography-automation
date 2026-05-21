@@ -68,26 +68,61 @@ LOG_TAG_COLOR = {
 
 def _friendly_error(e: Exception) -> str:
     """Turn raw exception messages into plain-English hints."""
+    import re
     msg = str(e)
     low = msg.lower()
-    if "gpib" in low or "linux-gpib" in low or "gpib_ctypes" in low or "no module named 'gpib'" in low:
-        return "GPIB driver not installed — run:  pip install gpib-ctypes"
+
+    # Missing DLL — catches GPIB adapter drivers, Kinesis, Xeneth, etc.
+    if "could not find module" in low and ".dll" in low:
+        m = re.search(r"['\"]([^'\"]+\.dll)['\"]", msg)
+        name = m.group(1).split("\\")[-1] if m else "a required DLL"
+        nlow = name.lower()
+        if "gpib" in nlow:
+            return (f"Missing {name} — install NI-488.2 or Keysight IO Libraries "
+                    f"for your GPIB-USB adapter")
+        if "polarizer" in nlow or "kinesis" in nlow:
+            return "Thorlabs Kinesis DLL not found — install Kinesis software"
+        if "xeneth" in nlow or "xenics" in nlow:
+            return f"Xeneth SDK not found ({name}) — install Xenics camera software"
+        return f"Missing DLL: {name} — check driver installation"
+
+    # Python-level gpib binding actually missing
+    if "no module named 'gpib'" in low or "cannot import name 'gpib'" in low:
+        return "Python GPIB binding missing — pip install gpib-ctypes"
+
+    # gpib-ctypes installed but the system-level GPIB driver isn't loaded
+    if "gpib library not found" in low or "manually load it using _load_lib" in low \
+            or ("gpib" in low and "all gpib functions will raise" in low):
+        return ("System GPIB driver not loaded — install NI-488.2 (free from ni.com) "
+                "or Keysight IO Libraries for your GPIB-USB adapter, then reboot")
+
+    # NI-VISA / pyvisa errors
+    if "vi_error_rsrc_nfound" in low or "insufficient location information" in low:
+        return ("VISA resource not found at that address — check the discovered "
+                "resources logged below")
+    if "vi_error_tmo" in low or ("timeout" in low and "visa" in low):
+        return "VISA timeout — instrument may be off, busy, or at a different address"
+    if "vi_error_nlisteners" in low:
+        return "No GPIB listener at that address — wrong address, or instrument is off"
+    if "vi_error_io" in low:
+        return "VISA I/O error — check cable and instrument power"
+    if "no gateway" in low and "visa" in low:
+        return ("No VISA backend available — install NI-488.2 / Keysight IO Libraries, "
+                "or 'pip install pyvisa-py'")
+
+    # Serial / COM port
     if "could not open port" in low:
-        import re
         port = re.search(r"'(COM\d+)'", msg)
         p = port.group(1) if port else "the COM port"
-        return f"{p} not found — is the device plugged in and the right port set in config?"
+        return f"{p} not found or in use — is the device plugged in and the right port set in config?"
+
     if "polarizer.dll" in low or ("kinesis" in low and "dll" in low):
         return "Thorlabs Kinesis DLL not found — install Kinesis software and plug in motors"
-    if "could not find module" in low and ".dll" in low:
-        import re
-        dll = re.search(r"'([^']+\.dll)'", msg)
-        name = dll.group(1).split("\\")[-1] if dll else "a required DLL"
-        return f"Missing DLL: {name} — check driver installation"
-    if "exposuretime" in low or "property" in low:
-        return f"Camera property error (may still work): {msg}"
-    # Fallback — strip giant tracebacks, just keep first line
-    return msg.split("\n")[0][:120]
+    if "exposuretime" in low:
+        return f"Camera property warning (may still work): {msg.splitlines()[0]}"
+
+    # Fallback — strip giant tracebacks, keep first line
+    return msg.split("\n")[0][:160]
 
 
 # ── Application ───────────────────────────────────────────────────────────────
@@ -559,6 +594,17 @@ class HolographyApp:
         except Exception as e:
             hw("laser", "error")
             emit(f"✗ Laser — {_friendly_error(e)}", "WARN")
+            emit(f"  raw: {type(e).__name__}: {str(e).splitlines()[0][:200]}", "DEBUG")
+            try:
+                import pyvisa
+                res = pyvisa.ResourceManager().list_resources()
+                if res:
+                    emit(f"  Visible VISA resources: {', '.join(res)}", "INFO")
+                else:
+                    emit("  No VISA resources visible — adapter driver isn't loaded "
+                         "(install NI-488.2 from ni.com)", "WARN")
+            except Exception as e2:
+                emit(f"  VISA enumeration failed: {type(e2).__name__}: {e2}", "DEBUG")
             _fail.append("Laser")
 
         # Camera --------------------------------------------------------------
