@@ -31,6 +31,10 @@ class polMotors:  # max travel for this is 160 deg
         self.angles[motNum - 1] = angle
         self.lib.MPC_MoveToPosition(self.serialNumber, motNum, ctypes.c_double(angle))
 
+    def getPosition(self, motNum):
+        self.lib.MPC_GetPosition.restype = ctypes.c_double
+        return float(self.lib.MPC_GetPosition(self.serialNumber, ctypes.c_int(motNum)))
+
     def isBusy(self):
         time.sleep(0.01)
         a = self.lib.MPC_GetStatusBits(self.serialNumber, ctypes.c_int(1)) & 0xFF

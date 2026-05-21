@@ -216,10 +216,14 @@ class HolographyApp:
         self.notebook.pack(side="left", fill="both", expand=True)
 
         self._build_run_tab()
+        self._build_polarization_tab()
         self._build_config_tab()
         self._build_results_tab()
 
         self._build_log_panel(main)
+
+        # Polarization tab needs continuous angle polling
+        self._poll_paddle_positions()
 
     # ── Hardware bar ──────────────────────────────────────────────────────────
 
@@ -324,6 +328,172 @@ class HolographyApp:
         self._canvas.bind("<Configure>", lambda _e: self._redraw_frame())
         self._canvas.create_text(220, 120, text="No signal",
                                  fill=MUTED, font=self._font_metric, tags="nosignal")
+
+    # ── Polarization tab ──────────────────────────────────────────────────────
+
+    def _build_polarization_tab(self):
+        tab = ttk.Frame(self.notebook, padding=14)
+        self.notebook.add(tab, text="Polarization")
+
+        ttk.Label(tab, text="Paddle control", font=self._font_section).pack(
+            anchor="w", pady=(0, 4))
+        ttk.Label(tab, foreground=MUTED, font=self._font_small,
+                  text="Three motorized paddles squeeze the fiber to tune polarization. "
+                       "For holography you want signal and reference arms parallel — "
+                       "max fringes.").pack(anchor="w", pady=(0, 14))
+
+        self._paddle_cur_vars: dict    = {}
+        self._paddle_target_vars: dict = {}
+        self._paddle_target_lbls: dict = {}
+
+        for i in (1, 2, 3):
+            row = ttk.Frame(tab)
+            row.pack(fill="x", pady=8)
+
+            ttk.Label(row, text=f"Paddle {i}", font=self._font_body_bold,
+                      width=10).pack(side="left")
+
+            cur_var = tk.StringVar(value="—")
+            self._paddle_cur_vars[i] = cur_var
+            ttk.Label(row, textvariable=cur_var, font=self._font_metric,
+                      width=7, anchor="e").pack(side="left")
+
+            target_var = tk.DoubleVar(value=0.0)
+            self._paddle_target_vars[i] = target_var
+
+            slider = ttk.Scale(row, from_=0, to=160, variable=target_var,
+                               orient="horizontal", length=380)
+            slider.pack(side="left", padx=14, fill="x", expand=True)
+            slider.bind("<ButtonRelease-1>", lambda _e, p=i: self._move_paddle(p))
+
+            tgt_lbl = ttk.Label(row, text="target 0°", font=self._font_body,
+                                width=10, anchor="e", foreground=MUTED)
+            tgt_lbl.pack(side="left", padx=(4, 0))
+            self._paddle_target_lbls[i] = tgt_lbl
+            target_var.trace_add(
+                "write",
+                lambda *_a, p=i: self._paddle_target_lbls[p].configure(
+                    text=f"target {self._paddle_target_vars[p].get():.0f}°"))
+
+            ttk.Button(row, text="Home", width=7,
+                       command=lambda p=i: self._home_paddle(p)).pack(side="left", padx=(8, 0))
+
+        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=14)
+
+        ctrl = ttk.Frame(tab)
+        ctrl.pack(fill="x")
+        ttk.Button(ctrl, text="Home all",
+                   command=self._home_all_paddles).pack(side="left")
+        self._pol_optimize_btn = ttk.Button(
+            ctrl, text="Auto-optimize for fringes",
+            style="Accent.TButton",
+            command=self._auto_optimize_polarization)
+        self._pol_optimize_btn.pack(side="left", padx=8)
+
+        self._pol_status_var = tk.StringVar(value="Connect motors to enable controls.")
+        ttk.Label(tab, textvariable=self._pol_status_var,
+                  foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(14, 0))
+
+    def _poll_paddle_positions(self):
+        if self.motors and hasattr(self, "_paddle_cur_vars"):
+            for i in (1, 2, 3):
+                try:
+                    a = (self.motors.getPosition(i)
+                         if hasattr(self.motors, "getPosition")
+                         else self.motors.angles[i - 1])
+                    self._paddle_cur_vars[i].set(f"{a:.1f}°")
+                except Exception:
+                    pass
+        self.root.after(300, self._poll_paddle_positions)
+
+    def _sync_paddle_targets_from_hw(self):
+        """Set slider targets to whatever the motors currently report."""
+        if not self.motors or not hasattr(self, "_paddle_target_vars"):
+            return
+        for i in (1, 2, 3):
+            try:
+                a = (self.motors.getPosition(i)
+                     if hasattr(self.motors, "getPosition")
+                     else self.motors.angles[i - 1])
+                self._paddle_target_vars[i].set(float(a))
+            except Exception:
+                pass
+        self._pol_status_var.set("Ready.")
+
+    def _move_paddle(self, paddle: int):
+        if not self.motors:
+            self._pol_status_var.set("Motors not connected.")
+            return
+        target = float(self._paddle_target_vars[paddle].get())
+        target = max(0.0, min(160.0, target))
+        threading.Thread(target=self._move_paddle_worker,
+                         args=(paddle, target), daemon=True).start()
+
+    def _move_paddle_worker(self, paddle: int, target: float):
+        try:
+            self.motors.moveMotor(paddle, target)
+            self.msg_queue.put({"type": "log",
+                                "text": f"Paddle {paddle} → {target:.1f}°",
+                                "level": "INFO"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Paddle {paddle} move failed: {e}",
+                                "level": "WARN"})
+
+    def _home_paddle(self, paddle: int):
+        self._paddle_target_vars[paddle].set(0.0)
+        self._move_paddle(paddle)
+
+    def _home_all_paddles(self):
+        if not self.motors:
+            self._pol_status_var.set("Motors not connected.")
+            return
+        for i in (1, 2, 3):
+            self._home_paddle(i)
+
+    def _auto_optimize_polarization(self):
+        if not self.motors:
+            self._pol_status_var.set("Motors not connected.")
+            return
+        if not self.camera:
+            self._pol_status_var.set("Camera needed for fringe-based optimization.")
+            return
+        if self.experiment_running:
+            self._pol_status_var.set("Stop the experiment first.")
+            return
+        self._pol_optimize_btn.configure(state="disabled")
+        self._pol_status_var.set("Sweeping paddles — this can take a minute…")
+        threading.Thread(target=self._auto_optimize_worker, daemon=True).start()
+
+    def _auto_optimize_worker(self):
+        try:
+            from fringe_detection import optimize_polarization_for_fringes
+            fd = self.config.get("experiment", {}).get("fringe_detection", {})
+            success, metric, angles = optimize_polarization_for_fringes(
+                self.camera, self.motors,
+                max_attempts=int(fd.get("max_attempts", 30)),
+                method=fd.get("check_method", "variance"),
+                threshold=float(fd.get("min_visibility", 0.15)),
+            )
+            tag = "OK" if success else "WARN"
+            mark = "✓" if success else "⚠"
+            msg = (f"{mark} Auto-optimize: paddles={[round(a, 1) for a in angles]}, "
+                   f"metric={metric:.3f}"
+                   + ("" if success else
+                      f"  (below threshold {fd.get('min_visibility', 0.15)})"))
+            self.msg_queue.put({"type": "log", "text": msg, "level": tag})
+            self._pol_status_var.set(msg)
+            self._sync_paddle_targets_from_hw()
+        except Exception as e:
+            import traceback
+            self.msg_queue.put({"type": "log",
+                                "text": f"Auto-optimize failed: {e}",
+                                "level": "ERROR"})
+            self.msg_queue.put({"type": "log", "text": traceback.format_exc(),
+                                "level": "DEBUG"})
+            self._pol_status_var.set(f"Failed: {e}")
+        finally:
+            self._pol_optimize_btn.configure(state="normal")
 
     # ── Config tab ────────────────────────────────────────────────────────────
 
@@ -978,6 +1148,9 @@ class HolographyApp:
 
             # Enable START as long as something is connected
             self._start_btn.configure(state="normal" if ok else "disabled")
+            # Initialize Polarization tab slider targets from the actual angles
+            if "Motors" in ok:
+                self._sync_paddle_targets_from_hw()
         elif event == "experiment":
             self._start_btn.configure(
                 state="normal" if self.hardware_connected else "disabled")
