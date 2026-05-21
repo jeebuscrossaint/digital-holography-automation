@@ -335,64 +335,62 @@ class HolographyApp:
         tab = ttk.Frame(self.notebook, padding=14)
         self.notebook.add(tab, text="Polarization")
 
-        ttk.Label(tab, text="Paddle control", font=self._font_section).pack(
-            anchor="w", pady=(0, 4))
         ttk.Label(tab, foreground=MUTED, font=self._font_small,
                   text="Three motorized paddles squeeze the fiber to tune polarization. "
                        "For holography you want signal and reference arms parallel — "
-                       "max fringes.").pack(anchor="w", pady=(0, 10))
+                       "max fringes.").pack(anchor="w", pady=(0, 12))
 
+        # Global jog size — applies to all three paddles
         jog_row = ttk.Frame(tab)
-        jog_row.pack(fill="x", pady=(0, 6))
-        ttk.Label(jog_row, text="Jog size",
-                  font=self._font_body).pack(side="left")
+        jog_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(jog_row, text="Jog size", font=self._font_body).pack(side="left")
         self._jog_size_var = tk.DoubleVar(value=1.0)
         ttk.Spinbox(jog_row, from_=0.1, to=10.0, increment=0.5,
                     textvariable=self._jog_size_var,
-                    width=6, format="%.1f").pack(side="left", padx=(8, 4))
+                    width=6, format="%.1f").pack(side="left", padx=(8, 2))
         ttk.Label(jog_row, text="°", foreground=MUTED).pack(side="left")
 
-        self._paddle_cur_vars: dict    = {}
+        self._paddle_cur_vars:    dict = {}
         self._paddle_target_vars: dict = {}
-        self._paddle_target_lbls: dict = {}
+
+        big_font = (self._font_title[0], 30)
 
         for i in (1, 2, 3):
-            row = ttk.Frame(tab)
-            row.pack(fill="x", pady=8)
+            card = ttk.LabelFrame(tab, text=f"  Paddle {i}  ", padding=14)
+            card.pack(fill="x", pady=6)
 
-            ttk.Label(row, text=f"Paddle {i}", font=self._font_body_bold,
-                      width=10).pack(side="left")
-
+            # Left: big current-angle readout
             cur_var = tk.StringVar(value="—")
             self._paddle_cur_vars[i] = cur_var
-            ttk.Label(row, textvariable=cur_var, font=self._font_metric,
-                      width=7, anchor="e").pack(side="left")
+            ttk.Label(card, textvariable=cur_var, font=big_font,
+                      width=7, anchor="w").pack(side="left", padx=(0, 20))
 
+            # Right: stacked control rows
+            right = ttk.Frame(card)
+            right.pack(side="left", fill="x", expand=True)
+
+            top = ttk.Frame(right)
+            top.pack(fill="x")
+            ttk.Label(top, text="Target", foreground=MUTED).pack(side="left", padx=(0, 6))
             target_var = tk.DoubleVar(value=0.0)
             self._paddle_target_vars[i] = target_var
+            sp = ttk.Spinbox(top, from_=0, to=160, increment=1.0,
+                             textvariable=target_var, width=8, format="%.1f")
+            sp.pack(side="left", padx=2)
+            sp.bind("<Return>", lambda _e, p=i: self._move_paddle(p))
+            ttk.Button(top, text="Move To", style="Accent.TButton",
+                       command=lambda p=i: self._move_paddle(p)).pack(side="left", padx=(6, 4))
+            ttk.Button(top, text="Home",
+                       command=lambda p=i: self._home_paddle(p)).pack(side="left", padx=2)
 
-            slider = ttk.Scale(row, from_=0, to=160, variable=target_var,
-                               orient="horizontal", length=380)
-            slider.pack(side="left", padx=14, fill="x", expand=True)
-            slider.bind("<ButtonRelease-1>", lambda _e, p=i: self._move_paddle(p))
+            bot = ttk.Frame(right)
+            bot.pack(fill="x", pady=(8, 0))
+            ttk.Button(bot, text="«  Jog", width=10,
+                       command=lambda p=i: self._jog_paddle(p, -1)).pack(side="left", padx=(0, 4))
+            ttk.Button(bot, text="Jog  »", width=10,
+                       command=lambda p=i: self._jog_paddle(p, +1)).pack(side="left")
 
-            tgt_lbl = ttk.Label(row, text="target 0°", font=self._font_body,
-                                width=10, anchor="e", foreground=MUTED)
-            tgt_lbl.pack(side="left", padx=(4, 0))
-            self._paddle_target_lbls[i] = tgt_lbl
-            target_var.trace_add(
-                "write",
-                lambda *_a, p=i: self._paddle_target_lbls[p].configure(
-                    text=f"target {self._paddle_target_vars[p].get():.0f}°"))
-
-            ttk.Button(row, text="◀", width=3,
-                       command=lambda p=i: self._jog_paddle(p, -1)).pack(side="left", padx=(8, 2))
-            ttk.Button(row, text="▶", width=3,
-                       command=lambda p=i: self._jog_paddle(p, +1)).pack(side="left", padx=2)
-            ttk.Button(row, text="Home", width=7,
-                       command=lambda p=i: self._home_paddle(p)).pack(side="left", padx=(6, 0))
-
-        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=14)
+        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=(14, 10))
 
         ctrl = ttk.Frame(tab)
         ctrl.pack(fill="x")
@@ -406,7 +404,7 @@ class HolographyApp:
 
         self._pol_status_var = tk.StringVar(value="Connect motors to enable controls.")
         ttk.Label(tab, textvariable=self._pol_status_var,
-                  foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(14, 0))
+                  foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(10, 0))
 
     def _poll_paddle_positions(self):
         if self.motors and hasattr(self, "_paddle_cur_vars"):
@@ -455,8 +453,25 @@ class HolographyApp:
                                 "level": "WARN"})
 
     def _home_paddle(self, paddle: int):
+        if not self.motors:
+            self._pol_status_var.set("Motors not connected.")
+            return
         self._paddle_target_vars[paddle].set(0.0)
-        self._move_paddle(paddle)
+        threading.Thread(target=self._home_paddle_worker,
+                         args=(paddle,), daemon=True).start()
+
+    def _home_paddle_worker(self, paddle: int):
+        try:
+            if hasattr(self.motors, "homeMotor"):
+                self.motors.homeMotor(paddle)
+            else:
+                self.motors.moveMotor(paddle, 0.0)
+            self.msg_queue.put({"type": "log",
+                                "text": f"Paddle {paddle} home", "level": "INFO"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Paddle {paddle} home failed: {e}",
+                                "level": "WARN"})
 
     def _jog_paddle(self, paddle: int, direction: int):
         if not self.motors:
