@@ -43,16 +43,29 @@ class polMotors:  # max travel 160°
 
         _check("MPC_Open", self.lib.MPC_Open(self.serialNumber))
 
-        # Yesterday's working sequence: slow polling, LoadSettings, settle,
-        # one SetEnabledPaddles(All), per-paddle Home, then ramp polling up.
-        # The per-paddle enable sequence we tried regressed paddle 3 to
-        # status 0x0 (controller drops the channel between calls).
         self.lib.MPC_StartPolling(self.serialNumber, 50)
+
+        # Some MPC firmware needs an explicit RequestSettings handshake
+        # before LoadSettings, otherwise the polling thread doesn't
+        # populate the per-paddle status cache for every paddle.
+        self._call_optional("MPC_RequestSettings", self.serialNumber)
+        time.sleep(0.3)
+
         self.lib.MPC_LoadSettings(self.serialNumber)
         time.sleep(3.0)
 
         self.lib.MPC_ClearMessageQueue(self.serialNumber)
         self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES)
+        time.sleep(0.2)
+
+        # Wake each paddle's status cache. Without these calls the polling
+        # thread leaves paddle 3 at status=0x0 forever even though it's
+        # physically present and Kinesis can drive it.
+        for paddle in (1, 2, 3):
+            self._call_optional("MPC_RequestStatusBits", self.serialNumber, _PADDLE_BITS[paddle])
+            self._call_optional("MPC_RequestStatus",     self.serialNumber, _PADDLE_BITS[paddle])
+            self._call_optional("MPC_RequestPosition",   self.serialNumber, _PADDLE_BITS[paddle])
+            time.sleep(0.1)
 
         # MPC_Home routinely returns code 43 (MOT_NoMotorInfo) even when
         # the move actually queues and the paddle physically rotates —
@@ -107,6 +120,25 @@ class polMotors:  # max travel 160°
 
     def _status(self, motNum):
         return int(self.lib.MPC_GetStatusBits(self.serialNumber, _PADDLE_BITS[motNum]))
+
+    def _call_optional(self, name, *args):
+        """Try to call a Kinesis function that may not exist in every SDK
+        version. Returns None on missing symbol or call failure."""
+        try:
+            fn = getattr(self.lib, name)
+        except AttributeError:
+            return None
+        # Set conservative argtypes if we know the shape
+        if len(args) == 1:
+            fn.argtypes = [ctypes.c_char_p]
+            fn.restype  = ctypes.c_short
+        elif len(args) == 2:
+            fn.argtypes = [ctypes.c_char_p, ctypes.c_short]
+            fn.restype  = ctypes.c_short
+        try:
+            return fn(*args)
+        except Exception:
+            return None
 
     def moveMotor(self, motNum, angle):
         angle = float(angle)
