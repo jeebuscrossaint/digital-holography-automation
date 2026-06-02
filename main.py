@@ -444,9 +444,17 @@ class HolographyApp:
     def _move_paddle_worker(self, paddle: int, target: float):
         try:
             self.motors.moveMotor(paddle, target)
-            self.msg_queue.put({"type": "log",
-                                "text": f"Paddle {paddle} → {target:.1f}°",
-                                "level": "INFO"})
+            time.sleep(0.4)  # let the motion start before reading
+            actual = (self.motors.getPosition(paddle)
+                      if hasattr(self.motors, "getPosition")
+                      else target)
+            ok = abs(actual - target) < 1.0
+            self.msg_queue.put({
+                "type": "log",
+                "text": f"Paddle {paddle} → {target:.1f}°  (now {actual:.1f}°)"
+                        + ("" if ok else "  ⚠ didn't reach target"),
+                "level": "INFO" if ok else "WARN",
+            })
         except Exception as e:
             self.msg_queue.put({"type": "log",
                                 "text": f"Paddle {paddle} move failed: {e}",

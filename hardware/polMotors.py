@@ -118,12 +118,27 @@ class polMotors:  # max travel 160°
     def moveMotor(self, motNum, angle):
         angle = float(angle)
         self.angles[motNum - 1] = angle
-        code = self.lib.MPC_MoveToPosition(self.serialNumber,
-                                           _PADDLE_BITS[motNum], angle)
-        if code != 0:
-            # SDK fibs — the move often physically executes anyway. Log so
-            # we can see it, but don't refuse the operation.
-            print(f"  MPC_MoveToPosition paddle {motNum} → {angle:.1f}° returned {code}")
+        start = self.getPosition(motNum)
+
+        for attempt in (0, 1):
+            code = self.lib.MPC_MoveToPosition(self.serialNumber,
+                                               _PADDLE_BITS[motNum], angle)
+            if code != 0:
+                print(f"  MPC_MoveToPosition paddle {motNum} → {angle:.1f}° returned {code}")
+
+            # If the paddle was already at target, no motion expected
+            if abs(angle - start) < 0.3:
+                return
+
+            # Did motion actually start? Sample after one polling cycle
+            time.sleep(0.35)
+            if abs(self.getPosition(motNum) - start) > 0.1:
+                return
+
+            if attempt == 0:
+                # First command got swallowed — retry once after a short pause
+                print(f"  Paddle {motNum} ignored move command, retrying once")
+                time.sleep(0.15)
 
     def getPosition(self, motNum):
         return float(self.lib.MPC_GetPosition(self.serialNumber,
