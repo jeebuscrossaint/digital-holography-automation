@@ -470,12 +470,23 @@ class HolographyApp:
 
     def _home_paddle_worker(self, paddle: int):
         try:
+            start = (self.motors.getPosition(paddle)
+                     if hasattr(self.motors, "getPosition") else None)
             if hasattr(self.motors, "homeMotor"):
                 self.motors.homeMotor(paddle)
             else:
                 self.motors.moveMotor(paddle, 0.0)
-            self.msg_queue.put({"type": "log",
-                                "text": f"Paddle {paddle} home", "level": "INFO"})
+            time.sleep(1.0)  # homing can take a moment
+            actual = (self.motors.getPosition(paddle)
+                      if hasattr(self.motors, "getPosition") else 0.0)
+            ok = abs(actual) < 1.0
+            extra = "" if start is None else f"  (from {start:.1f}°)"
+            self.msg_queue.put({
+                "type": "log",
+                "text": f"Paddle {paddle} home → now {actual:.1f}°{extra}"
+                        + ("" if ok else "  ⚠ not at 0°, didn't home"),
+                "level": "INFO" if ok else "WARN",
+            })
         except Exception as e:
             self.msg_queue.put({"type": "log",
                                 "text": f"Paddle {paddle} home failed: {e}",
@@ -906,6 +917,15 @@ class HolographyApp:
                 time.sleep(0.1)
             self._hw("motors", "connected")
             self._emit(f"✓ Motors  Thorlabs MPC320  SN:{serial}  homed", "OK")
+            # Per-paddle diagnostic so we can see whether each paddle is
+            # actually being addressed correctly by the SDK
+            for p in (1, 2, 3):
+                try:
+                    pos = self.motors.getPosition(p)
+                    bits = self.motors._status(p) if hasattr(self.motors, "_status") else 0
+                    self._emit(f"  Paddle {p}: pos={pos:.2f}°  status=0x{bits:08x}", "DEBUG")
+                except Exception as e:
+                    self._emit(f"  Paddle {p}: state read failed — {e}", "WARN")
             record_ok("Motors")
         except Exception as e:
             self._hw("motors", "error")
