@@ -81,9 +81,17 @@ class polMotors:
     def moveMotor(self, motNum, angle):
         angle = float(angle)
         self.angles[motNum - 1] = angle
-        self.lib.MPC_MoveToPosition(self._cp(),
-                                    ctypes.c_short(_PADDLE_BITS[motNum]),
-                                    ctypes.c_double(angle))
+        bits = ctypes.c_short(_PADDLE_BITS[motNum])
+        # Cancel any pending operation on this paddle — without this,
+        # paddle 3 often ignores new move commands on this firmware
+        try:
+            self.lib.MPC_Stop(self._cp(), bits)
+        except Exception:
+            pass
+        # Also re-assert that paddle 3 is in the polling thread's watch
+        # list (it can fall out during long idle periods)
+        self.lib.MPC_SetEnabledPaddles(self._cp(), ctypes.c_short(_ALL_PADDLES))
+        self.lib.MPC_MoveToPosition(self._cp(), bits, ctypes.c_double(angle))
 
     def homeMotor(self, motNum):
         self.lib.MPC_Home(self._cp(), ctypes.c_short(_PADDLE_BITS[motNum]))
