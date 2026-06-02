@@ -148,6 +148,8 @@ class HolographyApp:
         self._setup_theme()
         self._build_ui()
         self._poll_queue()
+        self._stop_background = threading.Event()
+        threading.Thread(target=self._background_poller, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Config ────────────────────────────────────────────────────────────────
@@ -223,9 +225,6 @@ class HolographyApp:
         self._build_results_tab()
 
         self._build_log_panel(main)
-
-        # Polarization tab needs continuous angle polling
-        self._poll_paddle_positions()
 
     # ── Hardware bar ──────────────────────────────────────────────────────────
 
@@ -392,31 +391,6 @@ class HolographyApp:
         ttk.Label(tab, textvariable=self._laser_status_var,
                   foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(14, 0))
 
-        self._poll_laser_state()
-
-    def _poll_laser_state(self):
-        if self.laser:
-            try:
-                wl = self.laser.checkWavelength()
-                if isinstance(wl, (int, float)):
-                    self._laser_wl_cur.set(f"{wl:.2f}")
-            except Exception:
-                pass
-            try:
-                pw_raw = self.laser.checkPowerAmplitude()
-                v = float(pw_raw)
-                # If it looks like dBm (small / negative), convert to µW
-                uw = (10 ** (v / 10) * 1000) if v < 50 else v
-                self._laser_pw_cur.set(f"{uw:.0f}")
-            except Exception:
-                pass
-            try:
-                on = self.laser.isOutputOn()
-                self._laser_out_state.set("ON" if "1" in str(on) else "OFF")
-            except Exception:
-                pass
-        self.root.after(3000, self._poll_laser_state)
-
     def _set_laser_wavelength(self):
         if not self.laser:
             self._laser_status_var.set("Laser not connected.")
@@ -511,19 +485,6 @@ class HolographyApp:
         self._switch_status_var = tk.StringVar(value="Connect to enable controls.")
         ttk.Label(tab, textvariable=self._switch_status_var,
                   foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(14, 0))
-
-        self._poll_switch_state()
-
-    def _poll_switch_state(self):
-        if self.switch:
-            try:
-                module = self.config.get("hardware", {}).get("fiber_switch", {}).get("module", 1)
-                pos = self.switch.get_position(module)
-                if pos is not None:
-                    self._switch_pos_cur.set(str(pos))
-            except Exception:
-                pass
-        self.root.after(2500, self._poll_switch_state)
 
     def _switch_to_leg(self, leg: int):
         if not self.switch:
@@ -622,17 +583,53 @@ class HolographyApp:
         ttk.Label(tab, textvariable=self._pol_status_var,
                   foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(10, 0))
 
-    def _poll_paddle_positions(self):
-        if self.motors and hasattr(self, "_paddle_cur_vars"):
-            for i in (1, 2, 3):
+    def _background_poller(self):
+        """Single daemon thread that reads hardware state and posts
+        updates to the message queue. Keeps blocking SDK calls (GPIB
+        queries, serial reads) off the Tk main thread so the GUI
+        never freezes."""
+        tick = 0
+        while not self._stop_background.is_set():
+            # Paddles — fast (Kinesis returns from its own cache)
+            if self.motors:
+                for i in (1, 2, 3):
+                    try:
+                        a = self.motors.getPosition(i)
+                        self.msg_queue.put({"type": "paddle_pos", "paddle": i, "value": a})
+                    except Exception:
+                        pass
+
+            # Laser — every ~3 s (GPIB roundtrip per query, slow)
+            if tick % 10 == 0 and self.laser:
                 try:
-                    a = (self.motors.getPosition(i)
-                         if hasattr(self.motors, "getPosition")
-                         else self.motors.angles[i - 1])
-                    self._paddle_cur_vars[i].set(f"{a:.1f}°")
+                    wl = self.laser.checkWavelength()
+                    self.msg_queue.put({"type": "laser_wl", "value": wl})
                 except Exception:
                     pass
-        self.root.after(300, self._poll_paddle_positions)
+                try:
+                    pw = self.laser.checkPowerAmplitude()
+                    self.msg_queue.put({"type": "laser_pw", "value": pw})
+                except Exception:
+                    pass
+                try:
+                    on = self.laser.isOutputOn()
+                    self.msg_queue.put({"type": "laser_out", "value": on})
+                except Exception:
+                    pass
+
+            # Switch — every ~2.4 s (serial roundtrip)
+            if tick % 8 == 0 and self.switch:
+                try:
+                    module = self.config.get("hardware", {}).get(
+                        "fiber_switch", {}).get("module", 1)
+                    pos = self.switch.get_position(module)
+                    if pos is not None:
+                        self.msg_queue.put({"type": "switch_pos", "value": pos})
+                except Exception:
+                    pass
+
+            tick += 1
+            self._stop_background.wait(0.3)
 
     def _sync_paddle_targets_from_hw(self):
         """Set slider targets to whatever the motors currently report."""
@@ -946,6 +943,25 @@ class HolographyApp:
                     self._show_frame(msg["data"])
                 elif t == "done":
                     self._on_done(msg.get("event"), msg.get("success", True))
+                elif t == "paddle_pos":
+                    p, v = msg["paddle"], msg["value"]
+                    if hasattr(self, "_paddle_cur_vars") and p in self._paddle_cur_vars:
+                        self._paddle_cur_vars[p].set(f"{v:.1f}°")
+                elif t == "laser_wl":
+                    v = msg["value"]
+                    if isinstance(v, (int, float)):
+                        self._laser_wl_cur.set(f"{v:.2f}")
+                elif t == "laser_pw":
+                    try:
+                        v = float(msg["value"])
+                        uw = (10 ** (v / 10) * 1000) if v < 50 else v
+                        self._laser_pw_cur.set(f"{uw:.0f}")
+                    except (TypeError, ValueError):
+                        pass
+                elif t == "laser_out":
+                    self._laser_out_state.set("ON" if "1" in str(msg["value"]) else "OFF")
+                elif t == "switch_pos":
+                    self._switch_pos_cur.set(str(msg["value"]))
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)
@@ -1193,6 +1209,7 @@ class HolographyApp:
 
     def _on_close(self):
         """Window close: stop experiment, disconnect hardware, then exit."""
+        self._stop_background.set()
         if self.experiment_running:
             self.stop_event.set()
         for obj, method in [
