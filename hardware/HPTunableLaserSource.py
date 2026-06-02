@@ -63,12 +63,17 @@ class HPTunableLaserSource:
 
     # --- power ---
 
-    def powerAmplitude(self, num):
-        """Set output power. num in dBm (e.g. -10.0) or as string 'MIN'/'MAX'/'DEF'."""
-        self.TL.write(f":SOUR:POW:LEV:IMM:AMPL {num}DBM")
+    def powerAmplitude(self, num, unit="UW"):
+        """Set output power. num is in the given unit; accepts MIN/MAX/DEF.
+        Use unit 'UW' (microwatts), 'DBM', 'NW', 'MW', 'W', etc. The
+        short :POW form is what the HP 8168E actually responds to."""
+        if unit:
+            self.TL.write(f":POW {num}{unit}")
+        else:
+            self.TL.write(f":POW {num}")
 
     def checkPowerAmplitude(self, string=''):
-        return self.TL.query(f":SOUR:POW:LEV:IMM:AMPL? {string}").strip()
+        return self.TL.query(f":POW? {string}").strip()
 
     def changePowerUnit(self, string):
         self.TL.write(f":POW:UNIT {string}")

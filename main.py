@@ -418,11 +418,9 @@ class HolographyApp:
 
     def _set_laser_power_worker(self, uw):
         try:
-            import math
-            dbm = 10 * math.log10(uw / 1000)
-            self.laser.powerAmplitude(f"{dbm:.2f}")
+            self.laser.powerAmplitude(uw, "UW")
             self.msg_queue.put({"type": "log",
-                                "text": f"Laser P → {uw:.0f} µW  ({dbm:.2f} dBm)",
+                                "text": f"Laser P → {uw:.0f} µW",
                                 "level": "INFO"})
         except Exception as e:
             self.msg_queue.put({"type": "log",
@@ -1069,12 +1067,10 @@ class HolographyApp:
         self._emit(f"Laser — trying {addr}…")
         try:
             from HPTunableLaserSource import HPTunableLaserSource
-            import math
             self.laser = HPTunableLaserSource(addr)
             self.laser.changePowerUnit(cfg_l.get("power_unit", "UW"))
-            # Driver's powerAmplitude appends "DBM" — convert µW to dBm first
             power_uw = float(cfg_l.get("power_uw", 208))
-            self.laser.powerAmplitude(f"{10 * math.log10(power_uw / 1000):.2f}")
+            self.laser.powerAmplitude(power_uw, "UW")
             self.laser.outputState(True)
             self._hw("laser", "connected")
             self._emit(f"✓ Laser  {addr}  output ON  ({power_uw:.0f} µW)", "OK")
