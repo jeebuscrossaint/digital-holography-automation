@@ -56,19 +56,22 @@ class polMotors:  # max travel 160°
         _check("MPC_SetEnabledPaddles",
                self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES))
 
-        # Home everything in a single call with the AllPaddles bitmask.
-        # Per-paddle Home calls can return error 43 ("no motor info") for
-        # paddle 3 if the previous home is still in flight.
-        _check("MPC_Home (all paddles)",
-               self.lib.MPC_Home(self.serialNumber, _ALL_PADDLES))
+        # MPC_Home routinely returns code 43 (MOT_NoMotorInfo) even though
+        # the home command actually queues and executes — you can hear the
+        # paddles move. Don't trust the return code; use the HOMED status
+        # bit as ground truth and only fail if we don't see it.
+        home_code = self.lib.MPC_Home(self.serialNumber, _ALL_PADDLES)
 
-        # Wait until every paddle reports the HOMED bit (timeout 30 s) — moves
-        # are silently rejected with MOT_NotHomed otherwise
         deadline = time.time() + 30
         while time.time() < deadline:
             if all(self._status(p) & _STATUS_HOMED for p in (1, 2, 3)):
                 break
             time.sleep(0.2)
+        else:
+            status = [hex(self._status(p)) for p in (1, 2, 3)]
+            raise RuntimeError(
+                f"Paddles did not reach HOMED within 30 s "
+                f"(MPC_Home returned {home_code}, status bits: {status})")
 
         self.angles = [0.0, 0.0, 0.0]
         self._closed = False

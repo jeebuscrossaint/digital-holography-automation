@@ -786,91 +786,109 @@ class HolographyApp:
         threading.Thread(target=self._connect_worker, daemon=True).start()
 
     def _connect_worker(self):
-        q = self.msg_queue
-        _ok: list[str] = []
-        _fail: list[str] = []
+        ok: list[str] = []
+        fail: list[str] = []
+        lock = threading.Lock()
 
-        def emit(text, level="INFO"):
-            q.put({"type": "log", "text": text, "level": level})
+        def record_ok(name):
+            with lock: ok.append(name)
+        def record_fail(name):
+            with lock: fail.append(name)
 
-        def hw(device, status):
-            q.put({"type": "hw_status", "device": device, "status": status})
+        threads = [
+            threading.Thread(target=self._connect_laser,  args=(record_ok, record_fail), daemon=True),
+            threading.Thread(target=self._connect_camera, args=(record_ok, record_fail), daemon=True),
+            threading.Thread(target=self._connect_switch, args=(record_ok, record_fail), daemon=True),
+            threading.Thread(target=self._connect_motors, args=(record_ok, record_fail), daemon=True),
+        ]
+        for t in threads: t.start()
+        for t in threads: t.join()
 
-        # Laser ---------------------------------------------------------------
-        hw("laser", "connecting")
+        self._connected_names = ok
+        self.hardware_connected = len(ok) > 0
+        self.msg_queue.put({"type": "done", "event": "connect", "success": True})
+
+    def _emit(self, text, level="INFO"):
+        self.msg_queue.put({"type": "log", "text": text, "level": level})
+
+    def _hw(self, device, status):
+        self.msg_queue.put({"type": "hw_status", "device": device, "status": status})
+
+    def _connect_laser(self, record_ok, record_fail):
+        self._hw("laser", "connecting")
         cfg_l = self.config.get("hardware", {}).get("laser", {})
         addr  = cfg_l.get("gpib_address", "GPIB0::24::INSTR")
-        emit(f"Laser — trying {addr}…")
+        self._emit(f"Laser — trying {addr}…")
         try:
             from HPTunableLaserSource import HPTunableLaserSource
             self.laser = HPTunableLaserSource(addr)
             self.laser.changePowerUnit(cfg_l.get("power_unit", "UW"))
             self.laser.powerAmplitude(cfg_l.get("power_uw", 208))
             self.laser.outputState(True)
-            hw("laser", "connected")
-            emit(f"✓ Laser  {addr}  output ON  ({cfg_l.get('power_uw', 208)} µW)", "OK")
-            _ok.append("Laser")
+            self._hw("laser", "connected")
+            self._emit(f"✓ Laser  {addr}  output ON  ({cfg_l.get('power_uw', 208)} µW)", "OK")
+            record_ok("Laser")
         except Exception as e:
-            hw("laser", "error")
-            emit(f"✗ Laser — {_friendly_error(e)}", "WARN")
-            emit(f"  raw: {type(e).__name__}: {str(e).splitlines()[0][:200]}", "DEBUG")
+            self._hw("laser", "error")
+            self._emit(f"✗ Laser — {_friendly_error(e)}", "WARN")
+            self._emit(f"  raw: {type(e).__name__}: {str(e).splitlines()[0][:200]}", "DEBUG")
             try:
                 from HPTunableLaserSource import _make_resource_manager
                 res = _make_resource_manager().list_resources()
                 if res:
-                    emit(f"  Visible VISA resources: {', '.join(res)}", "INFO")
+                    self._emit(f"  Visible VISA resources: {', '.join(res)}", "INFO")
                 else:
-                    emit("  No VISA resources visible — adapter driver isn't loaded "
-                         "(install NI-488.2 or Keysight IO Libraries)", "WARN")
+                    self._emit("  No VISA resources visible — adapter driver isn't loaded "
+                               "(install NI-488.2 or Keysight IO Libraries)", "WARN")
             except Exception as e2:
-                emit(f"  VISA enumeration failed: {type(e2).__name__}: {e2}", "DEBUG")
-            _fail.append("Laser")
+                self._emit(f"  VISA enumeration failed: {type(e2).__name__}: {e2}", "DEBUG")
+            record_fail("Laser")
 
-        # Camera --------------------------------------------------------------
-        hw("camera", "connecting")
+    def _connect_camera(self, record_ok, record_fail):
+        self._hw("camera", "connecting")
         cfg_c = self.config.get("hardware", {}).get("camera", {})
         url   = cfg_c.get("url", "cam://0")
         if not url or url in ("auto", ""):
             url = "cam://0"
-        emit(f"Camera — trying {url}…")
+        self._emit(f"Camera — trying {url}…")
         try:
-            from XenicsCam import xCam, dev_discovery
+            from XenicsCam import xCam
             self.camera = xCam(url=url)
             ser = int(self.camera.ser) if self.camera.ser else "?"
-            hw("camera", "connected")
-            emit(f"✓ Camera  Xenics Bobcat 320 GigE  SER:{ser}", "OK")
-            _ok.append("Camera")
+            self._hw("camera", "connected")
+            self._emit(f"✓ Camera  Xenics Bobcat 320 GigE  SER:{ser}", "OK")
+            record_ok("Camera")
             frame = self.camera.getFrame()
             if frame is not None:
-                q.put({"type": "frame", "data": frame})
+                self.msg_queue.put({"type": "frame", "data": frame})
             else:
-                emit("  (no frame yet — need light on sensor)", "DEBUG")
+                self._emit("  (no frame yet — need light on sensor)", "DEBUG")
         except Exception as e:
-            hw("camera", "error")
-            emit(f"✗ Camera — {_friendly_error(e)}", "WARN")
-            _fail.append("Camera")
+            self._hw("camera", "error")
+            self._emit(f"✗ Camera — {_friendly_error(e)}", "WARN")
+            record_fail("Camera")
 
-        # Fiber switch --------------------------------------------------------
-        hw("switch", "connecting")
+    def _connect_switch(self, record_ok, record_fail):
+        self._hw("switch", "connecting")
         cfg_s = self.config.get("hardware", {}).get("fiber_switch", {})
         port  = cfg_s.get("port", "COM6")
-        emit(f"Fiber switch — trying {port}…")
+        self._emit(f"Fiber switch — trying {port}…")
         try:
             from D700DiconSwitch import D700DiconSwitch
             self.switch = D700DiconSwitch(port=port, baudrate=cfg_s.get("baudrate", 9600))
-            hw("switch", "connected")
-            emit(f"✓ Switch  Dicon GP700  {port}", "OK")
-            _ok.append("Switch")
+            self._hw("switch", "connected")
+            self._emit(f"✓ Switch  Dicon GP700  {port}", "OK")
+            record_ok("Switch")
         except Exception as e:
-            hw("switch", "error")
-            emit(f"✗ Switch — {_friendly_error(e)}", "WARN")
-            _fail.append("Switch")
+            self._hw("switch", "error")
+            self._emit(f"✗ Switch — {_friendly_error(e)}", "WARN")
+            record_fail("Switch")
 
-        # Polarization motors -------------------------------------------------
-        hw("motors", "connecting")
+    def _connect_motors(self, record_ok, record_fail):
+        self._hw("motors", "connecting")
         cfg_m  = self.config.get("hardware", {}).get("polarization_motors", {})
         serial = str(cfg_m.get("serial_number", "38394984"))
-        emit(f"Polarization motors — SN {serial}…")
+        self._emit(f"Polarization motors — SN {serial}…")
         try:
             from polMotors import polMotors
             self.motors = polMotors(serialNumber=serial.encode())
@@ -878,18 +896,13 @@ class HolographyApp:
                 self.motors.moveMotor(i + 1, angle)
             while self.motors.isBusy():
                 time.sleep(0.1)
-            hw("motors", "connected")
-            emit(f"✓ Motors  Thorlabs MPC320  SN:{serial}  homed", "OK")
-            _ok.append("Motors")
+            self._hw("motors", "connected")
+            self._emit(f"✓ Motors  Thorlabs MPC320  SN:{serial}  homed", "OK")
+            record_ok("Motors")
         except Exception as e:
-            hw("motors", "error")
-            emit(f"✗ Motors — {_friendly_error(e)}", "WARN")
-            _fail.append("Motors")
-
-        # Summary -------------------------------------------------------------
-        self._connected_names = _ok
-        self.hardware_connected = len(_ok) > 0
-        q.put({"type": "done", "event": "connect", "success": True})
+            self._hw("motors", "error")
+            self._emit(f"✗ Motors — {_friendly_error(e)}", "WARN")
+            record_fail("Motors")
 
     def _disconnect_hardware(self):
         if self.experiment_running:
