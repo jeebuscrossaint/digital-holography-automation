@@ -43,34 +43,27 @@ class polMotors:  # max travel 160°
 
         _check("MPC_Open", self.lib.MPC_Open(self.serialNumber))
 
-        if not self.lib.MPC_StartPolling(self.serialNumber, 200):
-            raise RuntimeError("MPC_StartPolling failed")
-
-        # Settings must be loaded before the controller will accept moves /
-        # individual homing — otherwise MPC_Home returns code 43 (no motor info)
+        # Yesterday's working sequence: slow polling, LoadSettings, settle,
+        # one SetEnabledPaddles(All), per-paddle Home, then ramp polling up.
+        # The per-paddle enable sequence we tried regressed paddle 3 to
+        # status 0x0 (controller drops the channel between calls).
+        self.lib.MPC_StartPolling(self.serialNumber, 50)
         self.lib.MPC_LoadSettings(self.serialNumber)
-        time.sleep(2.5)
+        time.sleep(3.0)
 
         self.lib.MPC_ClearMessageQueue(self.serialNumber)
-
-        # Enable each paddle in its own call before the AllPaddles call.
-        # On some MPC firmware / USB-hub setups, a single AllPaddles
-        # enable call doesn't propagate to all three paddles (paddle 3
-        # ends up with status 0x0 = nothing reported).
-        for paddle in (1, 2, 3):
-            self.lib.MPC_SetEnabledPaddles(self.serialNumber, _PADDLE_BITS[paddle])
-            time.sleep(0.05)
         self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES)
-        time.sleep(0.1)
 
-        # Home each paddle individually. MPC_Home routinely returns code 43
-        # (MOT_NoMotorInfo) even when the move actually queues and the
-        # paddle physically rotates — don't trust the return code, just
-        # wait for motion to settle.
+        # MPC_Home routinely returns code 43 (MOT_NoMotorInfo) even when
+        # the move actually queues and the paddle physically rotates —
+        # don't trust the return code.
         for paddle in (1, 2, 3):
             code = self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[paddle])
             if code != 0:
                 print(f"  MPC_Home paddle {paddle} returned code {code} (often spurious)")
+
+        # Ramp polling up to a tighter cadence now that the device is up
+        self.lib.MPC_StartPolling(self.serialNumber, 200)
 
         # Wait for any homing motion to finish — up to 30 s.
         deadline = time.time() + 30

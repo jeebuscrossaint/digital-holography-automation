@@ -476,15 +476,20 @@ class HolographyApp:
                 self.motors.homeMotor(paddle)
             else:
                 self.motors.moveMotor(paddle, 0.0)
-            time.sleep(1.0)  # homing can take a moment
+            # Home is a calibration sweep, not a fast move — wait until the
+            # motor is no longer busy before sampling final position (cap 30s)
+            time.sleep(0.5)
+            deadline = time.time() + 30
+            while time.time() < deadline and self.motors.isBusy():
+                time.sleep(0.2)
             actual = (self.motors.getPosition(paddle)
                       if hasattr(self.motors, "getPosition") else 0.0)
-            ok = abs(actual) < 1.0
+            ok = abs(actual) < 2.0
             extra = "" if start is None else f"  (from {start:.1f}°)"
             self.msg_queue.put({
                 "type": "log",
                 "text": f"Paddle {paddle} home → now {actual:.1f}°{extra}"
-                        + ("" if ok else "  ⚠ not at 0°, didn't home"),
+                        + ("" if ok else "  ⚠ didn't reach 0°"),
                 "level": "INFO" if ok else "WARN",
             })
         except Exception as e:
