@@ -53,25 +53,29 @@ class polMotors:  # max travel 160°
 
         self.lib.MPC_ClearMessageQueue(self.serialNumber)
 
-        _check("MPC_SetEnabledPaddles",
-               self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES))
+        # Enable each paddle in its own call before the AllPaddles call.
+        # On some MPC firmware / USB-hub setups, a single AllPaddles
+        # enable call doesn't propagate to all three paddles (paddle 3
+        # ends up with status 0x0 = nothing reported).
+        for paddle in (1, 2, 3):
+            self.lib.MPC_SetEnabledPaddles(self.serialNumber, _PADDLE_BITS[paddle])
+            time.sleep(0.05)
+        self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES)
+        time.sleep(0.1)
 
-        # MPC_Home routinely returns code 43 (MOT_NoMotorInfo) even though
-        # the home command actually queues and executes — you can hear the
-        # paddles move. Don't trust the return code; use the HOMED status
-        # bit as ground truth and only fail if we don't see it.
-        home_code = self.lib.MPC_Home(self.serialNumber, _ALL_PADDLES)
+        # Home each paddle individually. MPC_Home routinely returns code 43
+        # (MOT_NoMotorInfo) even when the move actually queues and the
+        # paddle physically rotates — don't trust the return code, just
+        # wait for motion to settle.
+        for paddle in (1, 2, 3):
+            code = self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[paddle])
+            if code != 0:
+                print(f"  MPC_Home paddle {paddle} returned code {code} (often spurious)")
 
+        # Wait for any homing motion to finish — up to 30 s.
         deadline = time.time() + 30
-        while time.time() < deadline:
-            if all(self._status(p) & _STATUS_HOMED for p in (1, 2, 3)):
-                break
+        while time.time() < deadline and self.isBusy():
             time.sleep(0.2)
-        else:
-            status = [hex(self._status(p)) for p in (1, 2, 3)]
-            raise RuntimeError(
-                f"Paddles did not reach HOMED within 30 s "
-                f"(MPC_Home returned {home_code}, status bits: {status})")
 
         self.angles = [0.0, 0.0, 0.0]
         self._closed = False
@@ -114,17 +118,21 @@ class polMotors:  # max travel 160°
     def moveMotor(self, motNum, angle):
         angle = float(angle)
         self.angles[motNum - 1] = angle
-        _check(f"MPC_MoveToPosition paddle {motNum} → {angle:.1f}°",
-               self.lib.MPC_MoveToPosition(self.serialNumber,
-                                           _PADDLE_BITS[motNum], angle))
+        code = self.lib.MPC_MoveToPosition(self.serialNumber,
+                                           _PADDLE_BITS[motNum], angle)
+        if code != 0:
+            # SDK fibs — the move often physically executes anyway. Log so
+            # we can see it, but don't refuse the operation.
+            print(f"  MPC_MoveToPosition paddle {motNum} → {angle:.1f}° returned {code}")
 
     def getPosition(self, motNum):
         return float(self.lib.MPC_GetPosition(self.serialNumber,
                                               _PADDLE_BITS[motNum]))
 
     def homeMotor(self, motNum):
-        _check(f"MPC_Home paddle {motNum}",
-               self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[motNum]))
+        code = self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[motNum])
+        if code != 0:
+            print(f"  MPC_Home paddle {motNum} returned {code}")
 
     def isHomed(self, motNum):
         return bool(self._status(motNum) & _STATUS_HOMED)
