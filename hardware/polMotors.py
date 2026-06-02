@@ -91,16 +91,20 @@ class polMotors:
     def moveMotor(self, motNum, angle):
         angle = float(angle)
         self.angles[motNum - 1] = angle
-        # Re-wake every paddle in the polling cache before the move.
-        # The polling thread can drop paddle 3 during long idle periods
-        # (e.g. while you're staring at the GUI). These queries re-arm it.
-        for p in (1, 2, 3):
-            pb = ctypes.c_short(_PADDLE_BITS[p])
-            self.lib.MPC_GetStatusBits(self._cp(), pb)
-            self.lib.MPC_GetPosition(self._cp(), pb)
-        self.lib.MPC_MoveToPosition(self._cp(),
-                                    ctypes.c_short(_PADDLE_BITS[motNum]),
-                                    ctypes.c_double(angle))
+
+        # Big wake-up burst matching the probe exactly — same query masks
+        # in the same order. probe_mpc.py does this and paddle 3 moves;
+        # smaller wake-ups don't seem to be enough.
+        for mask in (0x01, 0x02, 0x04, 0x08, 1, 2, 3, 4, 8):
+            self.lib.MPC_GetStatusBits(self._cp(), ctypes.c_short(mask))
+            self.lib.MPC_GetPosition(self._cp(),  ctypes.c_short(mask))
+
+        bits = ctypes.c_short(_PADDLE_BITS[motNum])
+        # Hammer the move command — paddle 3 sometimes ignores the first
+        # one. Safe for paddles 1/2: re-issuing the same target is a no-op.
+        for _ in range(4):
+            self.lib.MPC_MoveToPosition(self._cp(), bits, ctypes.c_double(angle))
+            time.sleep(0.5)
 
     def homeMotor(self, motNum):
         self.lib.MPC_Home(self._cp(), ctypes.c_short(_PADDLE_BITS[motNum]))
