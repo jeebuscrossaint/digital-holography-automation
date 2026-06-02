@@ -43,34 +43,27 @@ class polMotors:  # max travel 160°
 
         _check("MPC_Open", self.lib.MPC_Open(self.serialNumber))
 
-        self.lib.MPC_StartPolling(self.serialNumber, 50)
-
-        # Some MPC firmware needs an explicit RequestSettings handshake
-        # before LoadSettings, otherwise the polling thread doesn't
-        # populate the per-paddle status cache for every paddle.
+        # Order matters: the MPC polling thread captures the enabled-paddle
+        # list when MPC_StartPolling is called. If SetEnabledPaddles is
+        # called AFTER StartPolling, paddle 3 reports status 0x0 forever
+        # because the polling thread isn't watching it — confirmed by
+        # probe: GetEnabledPaddles returns 0x7 but paddle 3 stays dark.
+        # So: settings → enable → start polling.
         self._call_optional("MPC_RequestSettings", self.serialNumber)
-        time.sleep(0.3)
-
+        time.sleep(0.5)
         self.lib.MPC_LoadSettings(self.serialNumber)
-        time.sleep(3.0)
-
+        time.sleep(2.5)
         self.lib.MPC_ClearMessageQueue(self.serialNumber)
         self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES)
-        time.sleep(0.2)
+        time.sleep(0.3)
 
-        # Speculative: some MPC SDK versions need a per-paddle channel enable
-        # in addition to SetEnabledPaddles. If present in the DLL, call it.
-        for paddle in (1, 2, 3):
-            self._call_optional("MPC_EnableChannel", self.serialNumber, _PADDLE_BITS[paddle])
-            time.sleep(0.05)
+        self.lib.MPC_StartPolling(self.serialNumber, 200)
+        time.sleep(0.5)
 
-        # Wake each paddle's status cache. Without these calls the polling
-        # thread leaves paddle 3 at status=0x0 forever even though it's
-        # physically present and Kinesis can drive it.
+        # Per-paddle status nudge (the DLL exports MPC_RequestStatus, not
+        # MPC_RequestStatusBits, on this version)
         for paddle in (1, 2, 3):
-            self._call_optional("MPC_RequestStatusBits", self.serialNumber, _PADDLE_BITS[paddle])
-            self._call_optional("MPC_RequestStatus",     self.serialNumber, _PADDLE_BITS[paddle])
-            self._call_optional("MPC_RequestPosition",   self.serialNumber, _PADDLE_BITS[paddle])
+            self._call_optional("MPC_RequestStatus", self.serialNumber, _PADDLE_BITS[paddle])
             time.sleep(0.1)
 
         # MPC_Home routinely returns code 43 (MOT_NoMotorInfo) even when
@@ -80,9 +73,6 @@ class polMotors:  # max travel 160°
             code = self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[paddle])
             if code != 0:
                 print(f"  MPC_Home paddle {paddle} returned code {code} (often spurious)")
-
-        # Ramp polling up to a tighter cadence now that the device is up
-        self.lib.MPC_StartPolling(self.serialNumber, 200)
 
         # Wait for any homing motion to finish — up to 30 s.
         deadline = time.time() + 30
