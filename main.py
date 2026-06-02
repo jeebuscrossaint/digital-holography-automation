@@ -916,12 +916,11 @@ class HolographyApp:
         try:
             from polMotors import polMotors
             self.motors = polMotors(serialNumber=serial.encode())
-            for i, angle in enumerate(cfg_m.get("initial_angles", [0, 0, 0])):
-                self.motors.moveMotor(i + 1, angle)
-            while self.motors.isBusy():
-                time.sleep(0.1)
+            # Don't auto-home or auto-move — that puts paddle 3 in a
+            # state where subsequent moves are ignored on this firmware.
+            # User can home via the Polarization tab Home buttons.
             self._hw("motors", "connected")
-            self._emit(f"✓ Motors  Thorlabs MPC320  SN:{serial}  homed", "OK")
+            self._emit(f"✓ Motors  Thorlabs MPC320  SN:{serial}  connected", "OK")
             # Per-paddle diagnostic so we can see whether each paddle is
             # actually being addressed correctly by the SDK
             for p in (1, 2, 3):

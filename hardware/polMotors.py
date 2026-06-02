@@ -49,35 +49,22 @@ class polMotors:  # max travel 160°
         # because the polling thread isn't watching it — confirmed by
         # probe: GetEnabledPaddles returns 0x7 but paddle 3 stays dark.
         # So: settings → enable → start polling.
+        # Minimal init: replicate exactly what the probe did, which
+        # actually moved paddle 3. No MPC_Home in here — homing seems
+        # to put paddle 3 into a state where it stops accepting moves.
+        # The GUI Home button still works if the user wants to home.
+        self.lib.MPC_StartPolling(self.serialNumber, 200)
         self._call_optional("MPC_RequestSettings", self.serialNumber)
         time.sleep(0.5)
         self.lib.MPC_LoadSettings(self.serialNumber)
-        time.sleep(2.5)
+        time.sleep(3.0)
         self.lib.MPC_ClearMessageQueue(self.serialNumber)
         self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES)
-        time.sleep(0.3)
-
-        self.lib.MPC_StartPolling(self.serialNumber, 200)
         time.sleep(0.5)
 
-        # Per-paddle status nudge (the DLL exports MPC_RequestStatus, not
-        # MPC_RequestStatusBits, on this version)
         for paddle in (1, 2, 3):
             self._call_optional("MPC_RequestStatus", self.serialNumber, _PADDLE_BITS[paddle])
             time.sleep(0.1)
-
-        # MPC_Home routinely returns code 43 (MOT_NoMotorInfo) even when
-        # the move actually queues and the paddle physically rotates —
-        # don't trust the return code.
-        for paddle in (1, 2, 3):
-            code = self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[paddle])
-            if code != 0:
-                print(f"  MPC_Home paddle {paddle} returned code {code} (often spurious)")
-
-        # Wait for any homing motion to finish — up to 30 s.
-        deadline = time.time() + 30
-        while time.time() < deadline and self.isBusy():
-            time.sleep(0.2)
 
         self.angles = [0.0, 0.0, 0.0]
         self._closed = False
