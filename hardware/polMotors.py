@@ -58,6 +58,12 @@ class polMotors:  # max travel 160°
         self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES)
         time.sleep(0.2)
 
+        # Speculative: some MPC SDK versions need a per-paddle channel enable
+        # in addition to SetEnabledPaddles. If present in the DLL, call it.
+        for paddle in (1, 2, 3):
+            self._call_optional("MPC_EnableChannel", self.serialNumber, _PADDLE_BITS[paddle])
+            time.sleep(0.05)
+
         # Wake each paddle's status cache. Without these calls the polling
         # thread leaves paddle 3 at status=0x0 forever even though it's
         # physically present and Kinesis can drive it.
