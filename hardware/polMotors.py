@@ -69,6 +69,16 @@ class polMotors:
         self.lib.MPC_SetEnabledPaddles(self._cp(), ctypes.c_short(_ALL_PADDLES))
         time.sleep(0.5)
 
+        # The probe does ~9 GetStatusBits + GetPosition queries here
+        # before the first move. THAT's what registers paddle 3 with
+        # the polling thread — probe_mpc.py does these and moves
+        # paddle 3, move_paddle3.py skips them and doesn't.
+        for paddle in (1, 2, 3):
+            bits = ctypes.c_short(_PADDLE_BITS[paddle])
+            self.lib.MPC_GetStatusBits(self._cp(), bits)
+            self.lib.MPC_GetPosition(self._cp(), bits)
+            time.sleep(0.05)
+
         self.angles = [0.0, 0.0, 0.0]
         self._closed = False
 
@@ -81,17 +91,16 @@ class polMotors:
     def moveMotor(self, motNum, angle):
         angle = float(angle)
         self.angles[motNum - 1] = angle
-        bits = ctypes.c_short(_PADDLE_BITS[motNum])
-        # Cancel any pending operation on this paddle — without this,
-        # paddle 3 often ignores new move commands on this firmware
-        try:
-            self.lib.MPC_Stop(self._cp(), bits)
-        except Exception:
-            pass
-        # Also re-assert that paddle 3 is in the polling thread's watch
-        # list (it can fall out during long idle periods)
-        self.lib.MPC_SetEnabledPaddles(self._cp(), ctypes.c_short(_ALL_PADDLES))
-        self.lib.MPC_MoveToPosition(self._cp(), bits, ctypes.c_double(angle))
+        # Re-wake every paddle in the polling cache before the move.
+        # The polling thread can drop paddle 3 during long idle periods
+        # (e.g. while you're staring at the GUI). These queries re-arm it.
+        for p in (1, 2, 3):
+            pb = ctypes.c_short(_PADDLE_BITS[p])
+            self.lib.MPC_GetStatusBits(self._cp(), pb)
+            self.lib.MPC_GetPosition(self._cp(), pb)
+        self.lib.MPC_MoveToPosition(self._cp(),
+                                    ctypes.c_short(_PADDLE_BITS[motNum]),
+                                    ctypes.c_double(angle))
 
     def homeMotor(self, motNum):
         self.lib.MPC_Home(self._cp(), ctypes.c_short(_PADDLE_BITS[motNum]))

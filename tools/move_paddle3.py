@@ -33,6 +33,15 @@ try:
     lib.MPC_SetEnabledPaddles(ctypes.c_char_p(SERIAL), ctypes.c_short(0x07))
     time.sleep(0.5)
 
+    # CRITICAL wake-up: probe_mpc.py does these queries before the
+    # first move and paddle 3 moves; without them paddle 3 is dead.
+    lib.MPC_GetPosition.restype   = ctypes.c_double
+    lib.MPC_GetStatusBits.restype = ctypes.c_uint
+    for mask in (0x01, 0x02, 0x04):
+        lib.MPC_GetStatusBits(ctypes.c_char_p(SERIAL), ctypes.c_short(mask))
+        lib.MPC_GetPosition(ctypes.c_char_p(SERIAL), ctypes.c_short(mask))
+        time.sleep(0.05)
+
     print(f"Moving paddle 3 to {target}°... watch it.")
     lib.MPC_MoveToPosition(ctypes.c_char_p(SERIAL),
                            ctypes.c_short(0x04),
