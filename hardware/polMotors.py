@@ -1,30 +1,37 @@
 # -*- coding: utf-8 -*-
+"""Thorlabs MPC320 driver — minimal, matches tools/probe_mpc.py exactly.
+
+The probe successfully moved paddle 3 with a bare sequence:
+    Open → StartPolling → RequestSettings → LoadSettings →
+    ClearMessageQueue → SetEnabledPaddles → MoveToPosition
+
+Anything extra (auto-home, auto-move-to-0, verify+retry on moveMotor)
+breaks paddle 3 on this firmware. This module sticks to the
+known-working sequence and exposes only single-shot commands.
+"""
+
 import ctypes
 import os
 import time
 
 _DLL_PATH = r"C:\Program Files\Thorlabs\Kinesis\Thorlabs.MotionControl.Polarizer.dll"
 
-# Thorlabs MPC SDK: paddles are addressed by a single-bit mask, not by index
+# MPC SDK paddle enum (bitmask)
 _PADDLE_BITS = {1: 0x01, 2: 0x02, 3: 0x04}
 _ALL_PADDLES = 0x07
 
-# Status word bits we care about
-_STATUS_MOVING_CW  = 0x00000010   # bit 4
-_STATUS_MOVING_CCW = 0x00000020   # bit 5
-_STATUS_HOMING     = 0x00000200   # bit 9
-_STATUS_HOMED      = 0x00000400   # bit 10
+# Status bits
+_STATUS_MOVING_CW  = 0x00000010
+_STATUS_MOVING_CCW = 0x00000020
+_STATUS_HOMING     = 0x00000200
+_STATUS_HOMED      = 0x00000400
 _BUSY_BITS         = _STATUS_MOVING_CW | _STATUS_MOVING_CCW | _STATUS_HOMING
 
 
-def _check(name, code):
-    if code != 0:
-        raise RuntimeError(f"{name} returned Kinesis error code {code}")
+class polMotors:
+    """Bare-minimum MPC320 driver. Matches probe_mpc.py exactly."""
 
-
-class polMotors:  # max travel 160°
     def __init__(self, serialNumber=b"38394984"):
-        # Let Windows find the Kinesis support DLLs next to the polarizer DLL
         kinesis_dir = os.path.dirname(_DLL_PATH)
         if os.path.isdir(kinesis_dir):
             try:
@@ -34,128 +41,60 @@ class polMotors:  # max travel 160°
             os.environ["PATH"] = kinesis_dir + os.pathsep + os.environ.get("PATH", "")
 
         self.lib = ctypes.cdll.LoadLibrary(_DLL_PATH)
-        self._setup_signatures()
+        # Only set return types — argument types stay default so ctypes
+        # uses whatever we explicitly wrap with ctypes.c_short / c_double
+        self.lib.MPC_Open.restype          = ctypes.c_short
+        self.lib.MPC_Close.restype         = ctypes.c_short
+        self.lib.MPC_GetPosition.restype   = ctypes.c_double
+        self.lib.MPC_GetStatusBits.restype = ctypes.c_uint
+        self.lib.MPC_GetMaxTravel.restype  = ctypes.c_double
+
         self.lib.TLI_BuildDeviceList()
+        self._serial = serialNumber if isinstance(serialNumber, bytes) else str(serialNumber).encode()
+        self.serialNumber = self._serial  # backward-compat attr
 
-        # Keep the bytes alive — ctypes auto-converts to c_char_p with argtypes set
-        self.serialNumber = (serialNumber if isinstance(serialNumber, bytes)
-                             else str(serialNumber).encode())
+        if self.lib.MPC_Open(self._cp()) != 0:
+            raise RuntimeError("MPC_Open failed")
 
-        _check("MPC_Open", self.lib.MPC_Open(self.serialNumber))
-
-        # Order matters: the MPC polling thread captures the enabled-paddle
-        # list when MPC_StartPolling is called. If SetEnabledPaddles is
-        # called AFTER StartPolling, paddle 3 reports status 0x0 forever
-        # because the polling thread isn't watching it — confirmed by
-        # probe: GetEnabledPaddles returns 0x7 but paddle 3 stays dark.
-        # So: settings → enable → start polling.
-        # Minimal init: replicate exactly what the probe did, which
-        # actually moved paddle 3. No MPC_Home in here — homing seems
-        # to put paddle 3 into a state where it stops accepting moves.
-        # The GUI Home button still works if the user wants to home.
-        self.lib.MPC_StartPolling(self.serialNumber, 200)
-        self._call_optional("MPC_RequestSettings", self.serialNumber)
+        # The exact sequence the probe used to successfully move paddle 3
+        self.lib.MPC_StartPolling(self._cp(), ctypes.c_int(200))
+        try:
+            self.lib.MPC_RequestSettings(self._cp())
+        except Exception:
+            pass
         time.sleep(0.5)
-        self.lib.MPC_LoadSettings(self.serialNumber)
+        self.lib.MPC_LoadSettings(self._cp())
         time.sleep(3.0)
-        self.lib.MPC_ClearMessageQueue(self.serialNumber)
-        self.lib.MPC_SetEnabledPaddles(self.serialNumber, _ALL_PADDLES)
+        self.lib.MPC_ClearMessageQueue(self._cp())
+        self.lib.MPC_SetEnabledPaddles(self._cp(), ctypes.c_short(_ALL_PADDLES))
         time.sleep(0.5)
-
-        for paddle in (1, 2, 3):
-            self._call_optional("MPC_RequestStatus", self.serialNumber, _PADDLE_BITS[paddle])
-            time.sleep(0.1)
 
         self.angles = [0.0, 0.0, 0.0]
         self._closed = False
 
-    def _setup_signatures(self):
-        """Tell ctypes the exact argument and return types for every call.
-        Without this, ctypes guesses (default int return, no argument
-        checking) and the x64 calling convention can mis-place the double
-        position argument."""
-        L = self.lib
-        L.TLI_BuildDeviceList.restype     = ctypes.c_short
-        L.MPC_Open.argtypes               = [ctypes.c_char_p]
-        L.MPC_Open.restype                = ctypes.c_short
-        L.MPC_Close.argtypes              = [ctypes.c_char_p]
-        L.MPC_Close.restype               = ctypes.c_short
-        L.MPC_StartPolling.argtypes       = [ctypes.c_char_p, ctypes.c_int]
-        L.MPC_StartPolling.restype        = ctypes.c_bool
-        L.MPC_StopPolling.argtypes        = [ctypes.c_char_p]
-        L.MPC_StopPolling.restype         = None
-        L.MPC_ClearMessageQueue.argtypes  = [ctypes.c_char_p]
-        L.MPC_ClearMessageQueue.restype   = None
-        L.MPC_LoadSettings.argtypes       = [ctypes.c_char_p]
-        L.MPC_LoadSettings.restype        = ctypes.c_bool
-        L.MPC_SetEnabledPaddles.argtypes  = [ctypes.c_char_p, ctypes.c_short]
-        L.MPC_SetEnabledPaddles.restype   = ctypes.c_short
-        L.MPC_Home.argtypes               = [ctypes.c_char_p, ctypes.c_short]
-        L.MPC_Home.restype                = ctypes.c_short
-        L.MPC_MoveToPosition.argtypes     = [ctypes.c_char_p, ctypes.c_short, ctypes.c_double]
-        L.MPC_MoveToPosition.restype      = ctypes.c_short
-        L.MPC_GetPosition.argtypes        = [ctypes.c_char_p, ctypes.c_short]
-        L.MPC_GetPosition.restype         = ctypes.c_double
-        L.MPC_GetStatusBits.argtypes      = [ctypes.c_char_p, ctypes.c_short]
-        L.MPC_GetStatusBits.restype       = ctypes.c_uint
-        L.MPC_GetMaxTravel.argtypes       = [ctypes.c_char_p]
-        L.MPC_GetMaxTravel.restype        = ctypes.c_double
+    def _cp(self):
+        """Fresh c_char_p of the serial — matches what the probe does."""
+        return ctypes.c_char_p(self._serial)
 
-    def _status(self, motNum):
-        return int(self.lib.MPC_GetStatusBits(self.serialNumber, _PADDLE_BITS[motNum]))
-
-    def _call_optional(self, name, *args):
-        """Try to call a Kinesis function that may not exist in every SDK
-        version. Returns None on missing symbol or call failure."""
-        try:
-            fn = getattr(self.lib, name)
-        except AttributeError:
-            return None
-        # Set conservative argtypes if we know the shape
-        if len(args) == 1:
-            fn.argtypes = [ctypes.c_char_p]
-            fn.restype  = ctypes.c_short
-        elif len(args) == 2:
-            fn.argtypes = [ctypes.c_char_p, ctypes.c_short]
-            fn.restype  = ctypes.c_short
-        try:
-            return fn(*args)
-        except Exception:
-            return None
+    # ── single-shot commands (no retry, no verify) ─────────────────────────
 
     def moveMotor(self, motNum, angle):
         angle = float(angle)
         self.angles[motNum - 1] = angle
-        start = self.getPosition(motNum)
-
-        for attempt in (0, 1):
-            code = self.lib.MPC_MoveToPosition(self.serialNumber,
-                                               _PADDLE_BITS[motNum], angle)
-            if code != 0:
-                print(f"  MPC_MoveToPosition paddle {motNum} → {angle:.1f}° returned {code}")
-
-            # If the paddle was already at target, no motion expected
-            if abs(angle - start) < 0.3:
-                return
-
-            # Did motion actually start? Sample after one polling cycle
-            time.sleep(0.35)
-            if abs(self.getPosition(motNum) - start) > 0.1:
-                return
-
-            if attempt == 0:
-                # First command got swallowed — retry once after a short pause
-                print(f"  Paddle {motNum} ignored move command, retrying once")
-                time.sleep(0.15)
-
-    def getPosition(self, motNum):
-        return float(self.lib.MPC_GetPosition(self.serialNumber,
-                                              _PADDLE_BITS[motNum]))
+        self.lib.MPC_MoveToPosition(self._cp(),
+                                    ctypes.c_short(_PADDLE_BITS[motNum]),
+                                    ctypes.c_double(angle))
 
     def homeMotor(self, motNum):
-        code = self.lib.MPC_Home(self.serialNumber, _PADDLE_BITS[motNum])
-        if code != 0:
-            print(f"  MPC_Home paddle {motNum} returned {code}")
+        self.lib.MPC_Home(self._cp(), ctypes.c_short(_PADDLE_BITS[motNum]))
+
+    def getPosition(self, motNum):
+        return float(self.lib.MPC_GetPosition(self._cp(),
+                                              ctypes.c_short(_PADDLE_BITS[motNum])))
+
+    def _status(self, motNum):
+        return int(self.lib.MPC_GetStatusBits(self._cp(),
+                                              ctypes.c_short(_PADDLE_BITS[motNum])))
 
     def isHomed(self, motNum):
         return bool(self._status(motNum) & _STATUS_HOMED)
@@ -171,11 +110,11 @@ class polMotors:  # max travel 160°
         if self._closed:
             return
         try:
-            self.lib.MPC_StopPolling(self.serialNumber)
+            self.lib.MPC_StopPolling(self._cp())
         except Exception:
             pass
         try:
-            self.lib.MPC_Close(self.serialNumber)
+            self.lib.MPC_Close(self._cp())
         except Exception:
             pass
         self._closed = True
