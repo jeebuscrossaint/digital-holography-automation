@@ -898,6 +898,23 @@ class HolographyApp:
         except Exception as e:
             self._hw("switch", "error")
             self._emit(f"✗ Switch — {_friendly_error(e)}", "WARN")
+            try:
+                from serial.tools import list_ports
+                ports = list(list_ports.comports())
+                if ports:
+                    self._emit("  Available COM ports:", "INFO")
+                    for p in ports:
+                        desc = (p.description or "").strip()
+                        self._emit(f"    {p.device}  ({desc})", "INFO")
+                    self._emit(
+                        "  Switch should appear as something like 'USB Serial Port' "
+                        "or 'Prolific / FTDI USB-to-Serial'. Set 'fiber_switch.port' in "
+                        "Configuration to the matching one.", "INFO")
+                else:
+                    self._emit("  No COM ports visible — switch isn't plugged in, "
+                               "or the USB-to-serial driver isn't installed.", "WARN")
+            except Exception as e2:
+                self._emit(f"  Couldn't enumerate COM ports: {e2}", "DEBUG")
             record_fail("Switch")
 
     def _connect_motors(self, record_ok, record_fail):
