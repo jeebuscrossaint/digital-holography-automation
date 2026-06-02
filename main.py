@@ -216,6 +216,8 @@ class HolographyApp:
         self.notebook.pack(side="left", fill="both", expand=True)
 
         self._build_run_tab()
+        self._build_laser_tab()
+        self._build_switch_tab()
         self._build_polarization_tab()
         self._build_config_tab()
         self._build_results_tab()
@@ -328,6 +330,220 @@ class HolographyApp:
         self._canvas.bind("<Configure>", lambda _e: self._redraw_frame())
         self._canvas.create_text(220, 120, text="No signal",
                                  fill=MUTED, font=self._font_metric, tags="nosignal")
+
+    # ── Laser tab ─────────────────────────────────────────────────────────────
+
+    def _build_laser_tab(self):
+        tab = ttk.Frame(self.notebook, padding=14)
+        self.notebook.add(tab, text="Laser")
+
+        ttk.Label(tab, foreground=MUTED, font=self._font_small,
+                  text="HP 8168E tunable laser. 1475–1575 nm, SCPI over GPIB."
+                  ).pack(anchor="w", pady=(0, 12))
+
+        big = (self._font_title[0], 26)
+
+        # Wavelength card
+        wl = ttk.LabelFrame(tab, text="  Wavelength  ", padding=14)
+        wl.pack(fill="x", pady=6)
+        self._laser_wl_cur = tk.StringVar(value="—")
+        ttk.Label(wl, textvariable=self._laser_wl_cur, font=big,
+                  width=10, anchor="w").pack(side="left", padx=(0, 20))
+        ttk.Label(wl, text="nm", foreground=MUTED).pack(side="left", padx=(0, 16))
+        ttk.Label(wl, text="Target", foreground=MUTED).pack(side="left", padx=(0, 6))
+        self._laser_wl_target = tk.DoubleVar(value=1550.0)
+        sp = ttk.Spinbox(wl, from_=1475, to=1575, increment=1.0,
+                        textvariable=self._laser_wl_target, width=10, format="%.2f")
+        sp.pack(side="left", padx=2)
+        sp.bind("<Return>", lambda _e: self._set_laser_wavelength())
+        ttk.Label(wl, text="nm", foreground=MUTED).pack(side="left", padx=(2, 6))
+        ttk.Button(wl, text="Set λ", style="Accent.TButton",
+                   command=self._set_laser_wavelength).pack(side="left", padx=2)
+
+        # Power card
+        pw = ttk.LabelFrame(tab, text="  Power  ", padding=14)
+        pw.pack(fill="x", pady=6)
+        self._laser_pw_cur = tk.StringVar(value="—")
+        ttk.Label(pw, textvariable=self._laser_pw_cur, font=big,
+                  width=10, anchor="w").pack(side="left", padx=(0, 20))
+        ttk.Label(pw, text="µW", foreground=MUTED).pack(side="left", padx=(0, 16))
+        ttk.Label(pw, text="Target", foreground=MUTED).pack(side="left", padx=(0, 6))
+        self._laser_pw_target = tk.DoubleVar(value=208.0)
+        sp2 = ttk.Spinbox(pw, from_=50, to=500, increment=10,
+                          textvariable=self._laser_pw_target, width=10, format="%.0f")
+        sp2.pack(side="left", padx=2)
+        sp2.bind("<Return>", lambda _e: self._set_laser_power())
+        ttk.Label(pw, text="µW", foreground=MUTED).pack(side="left", padx=(2, 6))
+        ttk.Button(pw, text="Set P", style="Accent.TButton",
+                   command=self._set_laser_power).pack(side="left", padx=2)
+
+        # Output card
+        out = ttk.LabelFrame(tab, text="  Output  ", padding=14)
+        out.pack(fill="x", pady=6)
+        self._laser_out_state = tk.StringVar(value="—")
+        ttk.Label(out, textvariable=self._laser_out_state, font=big,
+                  width=6, anchor="w").pack(side="left", padx=(0, 20))
+        ttk.Button(out, text="Turn ON", style="Accent.TButton",
+                   command=lambda: self._set_laser_output(True)).pack(side="left", padx=4)
+        ttk.Button(out, text="Turn OFF",
+                   command=lambda: self._set_laser_output(False)).pack(side="left", padx=4)
+
+        self._laser_status_var = tk.StringVar(value="Connect to enable controls.")
+        ttk.Label(tab, textvariable=self._laser_status_var,
+                  foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(14, 0))
+
+        self._poll_laser_state()
+
+    def _poll_laser_state(self):
+        if self.laser:
+            try:
+                wl = self.laser.checkWavelength()
+                if isinstance(wl, (int, float)):
+                    self._laser_wl_cur.set(f"{wl:.2f}")
+            except Exception:
+                pass
+            try:
+                pw_raw = self.laser.checkPowerAmplitude()
+                v = float(pw_raw)
+                # If it looks like dBm (small / negative), convert to µW
+                uw = (10 ** (v / 10) * 1000) if v < 50 else v
+                self._laser_pw_cur.set(f"{uw:.0f}")
+            except Exception:
+                pass
+            try:
+                on = self.laser.isOutputOn()
+                self._laser_out_state.set("ON" if "1" in str(on) else "OFF")
+            except Exception:
+                pass
+        self.root.after(3000, self._poll_laser_state)
+
+    def _set_laser_wavelength(self):
+        if not self.laser:
+            self._laser_status_var.set("Laser not connected.")
+            return
+        threading.Thread(target=self._set_laser_wavelength_worker,
+                         args=(float(self._laser_wl_target.get()),),
+                         daemon=True).start()
+
+    def _set_laser_wavelength_worker(self, target):
+        try:
+            self.laser.changeWavelength(target)
+            self.msg_queue.put({"type": "log",
+                                "text": f"Laser λ → {target:.2f} nm", "level": "INFO"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Set λ failed: {e}", "level": "WARN"})
+
+    def _set_laser_power(self):
+        if not self.laser:
+            self._laser_status_var.set("Laser not connected.")
+            return
+        threading.Thread(target=self._set_laser_power_worker,
+                         args=(float(self._laser_pw_target.get()),),
+                         daemon=True).start()
+
+    def _set_laser_power_worker(self, uw):
+        try:
+            import math
+            dbm = 10 * math.log10(uw / 1000)
+            self.laser.powerAmplitude(f"{dbm:.2f}")
+            self.msg_queue.put({"type": "log",
+                                "text": f"Laser P → {uw:.0f} µW  ({dbm:.2f} dBm)",
+                                "level": "INFO"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Set P failed: {e}", "level": "WARN"})
+
+    def _set_laser_output(self, on):
+        if not self.laser:
+            self._laser_status_var.set("Laser not connected.")
+            return
+        threading.Thread(target=self._set_laser_output_worker,
+                         args=(on,), daemon=True).start()
+
+    def _set_laser_output_worker(self, on):
+        try:
+            self.laser.outputState(on)
+            self.msg_queue.put({"type": "log",
+                                "text": f"Laser output {'ON' if on else 'OFF'}",
+                                "level": "INFO"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Output toggle failed: {e}",
+                                "level": "WARN"})
+
+    # ── Switch tab ────────────────────────────────────────────────────────────
+
+    def _build_switch_tab(self):
+        tab = ttk.Frame(self.notebook, padding=14)
+        self.notebook.add(tab, text="Switch")
+
+        ttk.Label(tab, foreground=MUTED, font=self._font_small,
+                  text="Dicon GP700 fiber switch. Routes the input fiber to one of "
+                       "N output ports (legs of the photonic lantern)."
+                  ).pack(anchor="w", pady=(0, 12))
+
+        big = (self._font_title[0], 26)
+
+        pos = ttk.LabelFrame(tab, text="  Current leg  ", padding=14)
+        pos.pack(fill="x", pady=6)
+        self._switch_pos_cur = tk.StringVar(value="—")
+        ttk.Label(pos, textvariable=self._switch_pos_cur, font=big,
+                  width=4, anchor="w").pack(side="left", padx=(0, 20))
+        ttk.Label(pos, text="Go to leg", foreground=MUTED).pack(side="left", padx=(0, 6))
+        self._switch_pos_target = tk.IntVar(value=1)
+        sp = ttk.Spinbox(pos, from_=1, to=16, increment=1,
+                         textvariable=self._switch_pos_target, width=6)
+        sp.pack(side="left", padx=2)
+        sp.bind("<Return>", lambda _e: self._switch_to_leg(int(self._switch_pos_target.get())))
+        ttk.Button(pos, text="Move", style="Accent.TButton",
+                   command=lambda: self._switch_to_leg(int(self._switch_pos_target.get()))
+                   ).pack(side="left", padx=(6, 2))
+
+        quick = ttk.LabelFrame(tab, text="  Quick select  ", padding=14)
+        quick.pack(fill="x", pady=6)
+        legs = self.config.get("experiment", {}).get("legs", list(range(1, 8)))
+        for leg in legs:
+            ttk.Button(quick, text=f"Leg {leg}", width=8,
+                       command=lambda l=leg: self._switch_to_leg(l)
+                       ).pack(side="left", padx=4)
+
+        self._switch_status_var = tk.StringVar(value="Connect to enable controls.")
+        ttk.Label(tab, textvariable=self._switch_status_var,
+                  foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(14, 0))
+
+        self._poll_switch_state()
+
+    def _poll_switch_state(self):
+        if self.switch:
+            try:
+                module = self.config.get("hardware", {}).get("fiber_switch", {}).get("module", 1)
+                pos = self.switch.get_position(module)
+                if pos is not None:
+                    self._switch_pos_cur.set(str(pos))
+            except Exception:
+                pass
+        self.root.after(2500, self._poll_switch_state)
+
+    def _switch_to_leg(self, leg: int):
+        if not self.switch:
+            self._switch_status_var.set("Switch not connected.")
+            return
+        self._switch_pos_target.set(leg)
+        threading.Thread(target=self._switch_to_leg_worker, args=(leg,),
+                         daemon=True).start()
+
+    def _switch_to_leg_worker(self, leg: int):
+        try:
+            module = self.config.get("hardware", {}).get("fiber_switch", {}).get("module", 1)
+            self.switch.move_to_position(module, leg)
+            self.msg_queue.put({"type": "log",
+                                "text": f"Switch → leg {leg}",
+                                "level": "INFO"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Switch move to leg {leg} failed: {e}",
+                                "level": "WARN"})
 
     # ── Polarization tab ──────────────────────────────────────────────────────
 
@@ -837,12 +1053,15 @@ class HolographyApp:
         self._emit(f"Laser — trying {addr}…")
         try:
             from HPTunableLaserSource import HPTunableLaserSource
+            import math
             self.laser = HPTunableLaserSource(addr)
             self.laser.changePowerUnit(cfg_l.get("power_unit", "UW"))
-            self.laser.powerAmplitude(cfg_l.get("power_uw", 208))
+            # Driver's powerAmplitude appends "DBM" — convert µW to dBm first
+            power_uw = float(cfg_l.get("power_uw", 208))
+            self.laser.powerAmplitude(f"{10 * math.log10(power_uw / 1000):.2f}")
             self.laser.outputState(True)
             self._hw("laser", "connected")
-            self._emit(f"✓ Laser  {addr}  output ON  ({cfg_l.get('power_uw', 208)} µW)", "OK")
+            self._emit(f"✓ Laser  {addr}  output ON  ({power_uw:.0f} µW)", "OK")
             record_ok("Laser")
         except Exception as e:
             self._hw("laser", "error")
