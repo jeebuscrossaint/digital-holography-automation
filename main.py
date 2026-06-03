@@ -395,15 +395,16 @@ class HolographyApp:
         if not self.laser:
             self._laser_status_var.set("Laser not connected.")
             return
+        target = float(self._laser_wl_target.get())
+        self._laser_wl_cur.set(f"{target:.2f}")
+        self._log(f"Laser λ → {target:.2f} nm", "INFO")
+        self._mark_user_action()
         threading.Thread(target=self._set_laser_wavelength_worker,
-                         args=(float(self._laser_wl_target.get()),),
-                         daemon=True).start()
+                         args=(target,), daemon=True).start()
 
     def _set_laser_wavelength_worker(self, target):
         try:
             self.laser.changeWavelength(target)
-            self.msg_queue.put({"type": "log",
-                                "text": f"Laser λ → {target:.2f} nm", "level": "INFO"})
         except Exception as e:
             self.msg_queue.put({"type": "log",
                                 "text": f"Set λ failed: {e}", "level": "WARN"})
@@ -412,16 +413,16 @@ class HolographyApp:
         if not self.laser:
             self._laser_status_var.set("Laser not connected.")
             return
+        uw = float(self._laser_pw_target.get())
+        self._laser_pw_cur.set(f"{uw:.0f}")
+        self._log(f"Laser P → {uw:.0f} µW", "INFO")
+        self._mark_user_action()
         threading.Thread(target=self._set_laser_power_worker,
-                         args=(float(self._laser_pw_target.get()),),
-                         daemon=True).start()
+                         args=(uw,), daemon=True).start()
 
     def _set_laser_power_worker(self, uw):
         try:
             self.laser.powerAmplitude(uw, "UW")
-            self.msg_queue.put({"type": "log",
-                                "text": f"Laser P → {uw:.0f} µW",
-                                "level": "INFO"})
         except Exception as e:
             self.msg_queue.put({"type": "log",
                                 "text": f"Set P failed: {e}", "level": "WARN"})
@@ -430,15 +431,15 @@ class HolographyApp:
         if not self.laser:
             self._laser_status_var.set("Laser not connected.")
             return
+        self._laser_out_state.set("ON" if on else "OFF")
+        self._log(f"Laser output → {'ON' if on else 'OFF'}", "INFO")
+        self._mark_user_action()
         threading.Thread(target=self._set_laser_output_worker,
                          args=(on,), daemon=True).start()
 
     def _set_laser_output_worker(self, on):
         try:
             self.laser.outputState(on)
-            self.msg_queue.put({"type": "log",
-                                "text": f"Laser output {'ON' if on else 'OFF'}",
-                                "level": "INFO"})
         except Exception as e:
             self.msg_queue.put({"type": "log",
                                 "text": f"Output toggle failed: {e}",
@@ -489,6 +490,9 @@ class HolographyApp:
             self._switch_status_var.set("Switch not connected.")
             return
         self._switch_pos_target.set(leg)
+        self._switch_pos_cur.set(str(leg))
+        self._log(f"Switch → leg {leg}", "INFO")
+        self._mark_user_action()
         threading.Thread(target=self._switch_to_leg_worker, args=(leg,),
                          daemon=True).start()
 
@@ -496,9 +500,6 @@ class HolographyApp:
         try:
             module = self.config.get("hardware", {}).get("fiber_switch", {}).get("module", 1)
             self.switch.move_to_position(module, leg)
-            self.msg_queue.put({"type": "log",
-                                "text": f"Switch → leg {leg}",
-                                "level": "INFO"})
         except Exception as e:
             self.msg_queue.put({"type": "log",
                                 "text": f"Switch move to leg {leg} failed: {e}",
@@ -581,13 +582,22 @@ class HolographyApp:
         ttk.Label(tab, textvariable=self._pol_status_var,
                   foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(10, 0))
 
+    def _mark_user_action(self):
+        """Stamp the last-user-action time so the background poller
+        backs off briefly and the user's GPIB/serial command isn't
+        stuck behind a poll already in flight."""
+        self._user_action_time = time.monotonic()
+
     def _background_poller(self):
         """Single daemon thread that reads hardware state and posts
         updates to the message queue. Keeps blocking SDK calls (GPIB
         queries, serial reads) off the Tk main thread so the GUI
         never freezes."""
         tick = 0
+        self._user_action_time = 0.0
         while not self._stop_background.is_set():
+            user_busy = (time.monotonic() - self._user_action_time) < 1.5
+
             # Paddles — fast (Kinesis returns from its own cache)
             if self.motors:
                 for i in (1, 2, 3):
@@ -597,26 +607,24 @@ class HolographyApp:
                     except Exception:
                         pass
 
-            # Laser — every ~3 s (GPIB roundtrip per query, slow)
-            if tick % 10 == 0 and self.laser:
+            # Laser — staggered: each query on its own tick so one cycle is short
+            if self.laser and not user_busy:
+                slot = tick % 10
                 try:
-                    wl = self.laser.checkWavelength()
-                    self.msg_queue.put({"type": "laser_wl", "value": wl})
-                except Exception:
-                    pass
-                try:
-                    pw = self.laser.checkPowerAmplitude()
-                    self.msg_queue.put({"type": "laser_pw", "value": pw})
-                except Exception:
-                    pass
-                try:
-                    on = self.laser.isOutputOn()
-                    self.msg_queue.put({"type": "laser_out", "value": on})
+                    if slot == 0:
+                        wl = self.laser.checkWavelength()
+                        self.msg_queue.put({"type": "laser_wl", "value": wl})
+                    elif slot == 3:
+                        pw = self.laser.checkPowerAmplitude()
+                        self.msg_queue.put({"type": "laser_pw", "value": pw})
+                    elif slot == 6:
+                        on = self.laser.isOutputOn()
+                        self.msg_queue.put({"type": "laser_out", "value": on})
                 except Exception:
                     pass
 
             # Switch — every ~2.4 s (serial roundtrip)
-            if tick % 8 == 0 and self.switch:
+            if tick % 8 == 0 and self.switch and not user_busy:
                 try:
                     module = self.config.get("hardware", {}).get(
                         "fiber_switch", {}).get("module", 1)
