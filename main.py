@@ -950,9 +950,17 @@ class HolographyApp:
                     if isinstance(v, (int, float)):
                         self._laser_wl_cur.set(f"{v:.2f}")
                 elif t == "laser_pw":
+                    raw = str(msg["value"])
                     try:
-                        v = float(msg["value"])
-                        uw = (10 ** (v / 10) * 1000) if v < 50 else v
+                        v = float(raw)
+                        # 8168E reports :POW? as watts (e.g. "2.08e-04"); some
+                        # configurations return dBm or µW directly.
+                        if "e" in raw.lower() or abs(v) < 0.1:
+                            uw = v * 1e6                  # watts
+                        elif abs(v) < 50:
+                            uw = 10 ** (v / 10) * 1000    # dBm
+                        else:
+                            uw = v                        # already µW
                         self._laser_pw_cur.set(f"{uw:.0f}")
                     except (TypeError, ValueError):
                         pass

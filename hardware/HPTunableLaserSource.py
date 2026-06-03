@@ -88,15 +88,17 @@ class HPTunableLaserSource:
         if isinstance(nm, (int, float)):
             if not (_WL_MIN <= nm <= _WL_MAX):
                 raise ValueError(f"Wavelength {nm} nm out of range [{_WL_MIN}, {_WL_MAX}]")
-            self.TL.write(f":SOUR:WAV {nm:.4f}NM")
+            self.TL.write(f":WAVE {nm:.4f}NM")
         else:
-            self.TL.write(f":SOUR:WAV {nm}")
+            self.TL.write(f":WAVE {nm}")
 
     def checkWavelength(self, string=''):
-        """Return current wavelength in nm."""
-        raw = self.TL.query(f":SOUR:WAV? {string}").strip()
+        """Return current wavelength in nm. The 8168E reports in meters
+        (e.g. 1.55e-6) via the short :WAVE? form; convert if needed."""
+        raw = self.TL.query(f":WAVE? {string}").strip()
         try:
-            return float(raw) * 1e9  # instrument returns meters
+            v = float(raw)
+            return v * 1e9 if abs(v) < 1e-3 else v
         except ValueError:
             return raw
 
