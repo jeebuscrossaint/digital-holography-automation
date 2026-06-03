@@ -1,9 +1,7 @@
-import { Moon, Sun, Minus, Square, X } from "lucide-react";
+import { useState } from "react";
+import { Moon, Sun } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { cn } from "@/lib/utils";
 
-// Resolve the current window lazily inside handlers so any timing weirdness
-// at first render can't make these buttons disappear.
 const safe = (fn: () => Promise<unknown>) => () => { fn().catch(() => {}); };
 
 export function TitleBar({
@@ -13,56 +11,117 @@ export function TitleBar({
   theme: "light" | "dark";
   onToggleTheme: () => void;
 }) {
-  const onMin   = safe(() => getCurrentWindow().minimize());
-  const onMax   = safe(() => getCurrentWindow().toggleMaximize());
-  const onClose = safe(() => getCurrentWindow().close());
-
   return (
     <div
       data-tauri-drag-region
-      style={{ height: 36 }}
-      className="shrink-0 flex bg-bg border-b border-border select-none"
+      style={{
+        height: 36,
+        display: "flex",
+        background: "hsl(var(--bg))",
+        borderBottom: "1px solid hsl(var(--border))",
+        flexShrink: 0,
+        userSelect: "none",
+      }}
     >
       <div
         data-tauri-drag-region
-        className="flex items-center px-4 gap-2 flex-1 min-w-0"
+        style={{
+          flex: 1, display: "flex", alignItems: "center",
+          padding: "0 16px", gap: 8, minWidth: 0,
+        }}
       >
         <span
           aria-hidden
-          className="h-1.5 w-1.5 rounded-full shrink-0"
-          style={{ background: "hsl(var(--accent))" }}
+          style={{
+            width: 6, height: 6, borderRadius: 999,
+            background: "hsl(var(--accent))", flexShrink: 0,
+          }}
         />
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-faint truncate">
+        <span
+          style={{
+            fontFamily: "ui-monospace, 'Cascadia Mono', 'JetBrains Mono', monospace",
+            fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase",
+            color: "hsl(var(--faint))",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}
+        >
           photonic lantern holography
         </span>
       </div>
 
-      <Btn onClick={onToggleTheme} title={theme === "dark" ? "Light mode" : "Dark mode"}>
-        {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-      </Btn>
-      <span className="self-center mx-0.5 h-4 w-px bg-border/70" />
-      <Btn onClick={onMin}   title="Minimize"><Minus  className="h-3.5 w-3.5" /></Btn>
-      <Btn onClick={onMax}   title="Maximize"><Square className="h-3   w-3"   /></Btn>
-      <Btn onClick={onClose} title="Close" danger><X  className="h-3.5 w-3.5" /></Btn>
+      <Ctrl onClick={onToggleTheme} title={theme === "dark" ? "Light mode" : "Dark mode"}>
+        {theme === "dark"
+          ? <Sun  style={{ width: 14, height: 14 }} />
+          : <Moon style={{ width: 14, height: 14 }} />}
+      </Ctrl>
+
+      <span style={{
+        alignSelf: "center", margin: "0 2px",
+        height: 16, width: 1, background: "hsl(var(--border))",
+      }} />
+
+      <Ctrl onClick={safe(() => getCurrentWindow().minimize())} title="Minimize">
+        <Glyph>{"−"}</Glyph>{/* − minus sign */}
+      </Ctrl>
+      <Ctrl onClick={safe(() => getCurrentWindow().toggleMaximize())} title="Maximize">
+        <Glyph size={11}>{"□"}</Glyph>{/* □ white square */}
+      </Ctrl>
+      <Ctrl onClick={safe(() => getCurrentWindow().close())} title="Close" danger>
+        <Glyph>{"×"}</Glyph>{/* × multiplication sign */}
+      </Ctrl>
     </div>
   );
 }
 
-function Btn({
-  children,
-  danger,
-  ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }) {
+function Ctrl({
+  children, onClick, title, danger,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  danger?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
   return (
     <button
       type="button"
       data-tauri-no-drag
-      {...rest}
-      style={{ width: 44 }}
-      className={cn(
-        "shrink-0 flex items-center justify-center text-soft transition-colors",
-        danger ? "hover:bg-bad hover:text-white" : "hover:bg-panel hover:text-ink"
-      )}
-    />
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={title}
+      aria-label={title}
+      style={{
+        width: 44, height: 36,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: hover
+          ? (danger ? "hsl(var(--bad))" : "hsl(var(--panel))")
+          : "transparent",
+        color: hover
+          ? (danger ? "#fff" : "hsl(var(--ink))")
+          : "hsl(var(--soft))",
+        border: 0,
+        padding: 0,
+        cursor: "default",
+        transition: "background 80ms, color 80ms",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Glyph({ children, size = 14 }: { children: React.ReactNode; size?: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        fontSize: size,
+        lineHeight: 1,
+        fontFamily: "system-ui, 'Segoe UI', sans-serif",
+      }}
+    >
+      {children}
+    </span>
   );
 }
