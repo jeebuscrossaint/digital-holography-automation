@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TitleBar } from "./components/TitleBar";
-import { HardwareBar } from "./components/HardwareBar";
+import { OpticalPath } from "./components/OpticalPath";
 import { LogPanel, LogEntry } from "./components/LogPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/Tabs";
 import { LaserTab } from "./components/tabs/LaserTab";
@@ -11,13 +11,23 @@ import { RunTab } from "./components/tabs/RunTab";
 import { ConfigTab } from "./components/tabs/ConfigTab";
 import { ResultsTab } from "./components/tabs/ResultsTab";
 import { useTheme } from "./lib/theme";
-import { api, HardwareStatus } from "./lib/api";
+import {
+  api, HardwareStatus, LaserState, SwitchState, MotorState,
+} from "./lib/api";
 
 export default function App() {
   const { theme, toggle } = useTheme();
+  const [tab, setTab] = useState<string>("run");
+
   const [status, setStatus] = useState<HardwareStatus>({
     laser: "offline", camera: "offline", switch: "offline", motors: "offline",
   });
+  const [laser,  setLaser]  = useState<LaserState>({
+    wavelength_nm: null, power_uw: null, output_on: null,
+  });
+  const [switch_, setSwitch] = useState<SwitchState>({ position: null });
+  const [motors, setMotors] = useState<MotorState>({ angles: [0, 0, 0] });
+
   const [connecting, setConnecting] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
 
@@ -29,28 +39,50 @@ export default function App() {
     []
   );
 
-  // Reveal the (hidden) Tauri window as soon as the React tree is mounted
+  // Reveal the hidden Tauri window once React has painted at least once
+  const shown = useRef(false);
   useEffect(() => {
+    if (shown.current) return;
+    shown.current = true;
     (async () => {
       try {
-        const win = getCurrentWindow();
-        await win.show();
-        await win.setFocus();
-      } catch { /* fine in browser dev */ }
+        const w = getCurrentWindow();
+        await w.show();
+        await w.setFocus();
+      } catch { /* fine in non-tauri dev */ }
     })();
   }, []);
 
-  // Poll backend status
+  // Central poll: hardware status + key live values for every device.
+  // Tabs read from these props rather than running their own pollers.
   useEffect(() => {
     let alive = true;
-    const tick = async () => {
+    let tick = 0;
+
+    const poll = async () => {
       try {
         const s = await api.status();
-        if (alive) setStatus(s);
-      } catch { /* sidecar maybe not ready yet */ }
+        if (!alive) return;
+        setStatus(s);
+
+        // Paddle angles — fast, returns from Kinesis cache
+        if (s.motors === "online") {
+          try { setMotors(await api.motorsGet()); } catch { /* ignore */ }
+        }
+
+        // Slow channels — every ~10 ticks (~3 s)
+        if (tick % 10 === 0 && s.laser === "online") {
+          try { setLaser(await api.laserGet()); } catch { /* ignore */ }
+        }
+        if (tick % 8 === 0 && s.switch === "online") {
+          try { setSwitch(await api.switchGet()); } catch { /* ignore */ }
+        }
+      } catch { /* sidecar might still be warming up */ }
+      tick++;
     };
-    tick();
-    const id = setInterval(tick, 1500);
+
+    poll();
+    const id = setInterval(poll, 300);
     return () => { alive = false; clearInterval(id); };
   }, []);
 
@@ -82,23 +114,30 @@ export default function App() {
     <div className="h-full flex flex-col bg-bg text-ink font-sans">
       <TitleBar theme={theme} onToggleTheme={toggle} />
 
-      <div className="px-6 pt-5 pb-3 flex items-baseline gap-3">
-        <h1 className="text-xl font-semibold tracking-tight">Photonic Lantern Holography</h1>
+      <div className="px-6 pt-5 pb-1 flex items-baseline gap-3">
+        <h1 className="text-xl font-semibold tracking-tight">
+          Photonic Lantern Holography
+        </h1>
         <span className="text-xs font-mono uppercase tracking-wider text-faint">
           UCF · CREOL
         </span>
       </div>
 
-      <HardwareBar
+      <OpticalPath
+        active={tab}
+        onSelect={setTab}
         status={status}
+        laser={laser}
+        switch_={switch_}
+        motors={motors}
         connecting={connecting}
         onConnect={connectAll}
         onDisconnect={disconnectAll}
       />
 
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 border-t border-border">
         <div className="flex-1 min-w-0 flex flex-col">
-          <Tabs defaultValue="run">
+          <Tabs value={tab} onValueChange={setTab} defaultValue="run">
             <TabsList>
               <TabsTrigger value="run">Run</TabsTrigger>
               <TabsTrigger value="laser">Laser</TabsTrigger>
@@ -111,15 +150,24 @@ export default function App() {
               <RunTab online={status.camera === "online"} onLog={onLog} />
             </TabsContent>
             <TabsContent value="laser">
-              <LaserTab online={status.laser === "online"} onLog={onLog} />
+              <LaserTab
+                online={status.laser === "online"}
+                state={laser}
+                onLog={onLog}
+              />
             </TabsContent>
             <TabsContent value="switch">
-              <SwitchTab online={status.switch === "online"} onLog={onLog} />
+              <SwitchTab
+                online={status.switch === "online"}
+                state={switch_}
+                onLog={onLog}
+              />
             </TabsContent>
             <TabsContent value="polarization">
               <PolarizationTab
                 online={status.motors === "online"}
                 cameraOnline={status.camera === "online"}
+                state={motors}
                 onLog={onLog}
               />
             </TabsContent>

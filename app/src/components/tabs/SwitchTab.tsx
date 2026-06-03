@@ -1,37 +1,23 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
-import { api } from "@/lib/api";
+import { api, SwitchState } from "@/lib/api";
 
 export function SwitchTab({
   online,
+  state,
   legs = [1, 2, 3, 4, 5, 6, 7],
   onLog,
 }: {
   online: boolean;
+  state: SwitchState;
   legs?: number[];
   onLog: (text: string, level?: "INFO" | "OK" | "WARN" | "ERROR") => void;
 }) {
-  const [pos, setPos] = useState<number | null>(null);
   const [target, setTarget] = useState("1");
 
-  useEffect(() => {
-    if (!online) return;
-    let alive = true;
-    const tick = async () => {
-      try {
-        const s = await api.switchGet();
-        if (alive) setPos(s.position);
-      } catch { /* ignore */ }
-    };
-    tick();
-    const id = setInterval(tick, 2500);
-    return () => { alive = false; clearInterval(id); };
-  }, [online]);
-
   const goTo = async (leg: number) => {
-    setPos(leg);
     onLog(`Switch → leg ${leg}`);
     try { await api.switchTo(leg); } catch (e: any) { onLog(`Switch failed: ${e}`, "WARN"); }
   };
@@ -47,7 +33,7 @@ export function SwitchTab({
         <CardBody>
           <div className="flex items-center gap-6">
             <div className="text-5xl font-light tabular-nums min-w-[4rem]">
-              {pos ?? "—"}
+              {state.position ?? "—"}
             </div>
             <div className="flex items-center gap-2">
               <Input
@@ -83,7 +69,7 @@ export function SwitchTab({
             {legs.map((leg) => (
               <Button
                 key={leg}
-                variant={pos === leg ? "primary" : "outline"}
+                variant={state.position === leg ? "primary" : "outline"}
                 disabled={!online}
                 onClick={() => goTo(leg)}
               >

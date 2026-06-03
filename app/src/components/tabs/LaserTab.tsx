@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -6,48 +6,30 @@ import { api, LaserState } from "@/lib/api";
 
 export function LaserTab({
   online,
+  state,
   onLog,
 }: {
   online: boolean;
+  state: LaserState;
   onLog: (text: string, level?: "INFO" | "OK" | "WARN" | "ERROR") => void;
 }) {
-  const [state, setState] = useState<LaserState>({
-    wavelength_nm: null, power_uw: null, output_on: null,
-  });
   const [wlTarget, setWlTarget] = useState("1550");
   const [pwTarget, setPwTarget] = useState("208");
-
-  useEffect(() => {
-    if (!online) return;
-    let alive = true;
-    const tick = async () => {
-      try {
-        const s = await api.laserGet();
-        if (alive) setState(s);
-      } catch { /* ignore */ }
-    };
-    tick();
-    const id = setInterval(tick, 3000);
-    return () => { alive = false; clearInterval(id); };
-  }, [online]);
 
   const setWl = async () => {
     const v = parseFloat(wlTarget);
     if (!isFinite(v)) return;
     onLog(`Laser λ → ${v.toFixed(2)} nm`);
-    setState((s) => ({ ...s, wavelength_nm: v }));
     try { await api.laserSetWl(v); } catch (e: any) { onLog(`Set λ failed: ${e}`, "WARN"); }
   };
   const setPw = async () => {
     const v = parseFloat(pwTarget);
     if (!isFinite(v)) return;
     onLog(`Laser P → ${v.toFixed(0)} µW`);
-    setState((s) => ({ ...s, power_uw: v }));
     try { await api.laserSetPow(v); } catch (e: any) { onLog(`Set P failed: ${e}`, "WARN"); }
   };
   const toggleOut = async (on: boolean) => {
     onLog(`Laser output → ${on ? "ON" : "OFF"}`);
-    setState((s) => ({ ...s, output_on: on }));
     try { await api.laserOutput(on); } catch (e: any) { onLog(`Output toggle failed: ${e}`, "WARN"); }
   };
 

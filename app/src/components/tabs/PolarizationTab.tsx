@@ -1,47 +1,33 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Slider } from "../ui/Slider";
 import { ChevronLeft, ChevronRight, Home } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, MotorState } from "@/lib/api";
 
 type Angles = [number, number, number];
 
 export function PolarizationTab({
   online,
   cameraOnline,
+  state,
   onLog,
 }: {
   online: boolean;
   cameraOnline: boolean;
+  state: MotorState;
   onLog: (text: string, level?: "INFO" | "OK" | "WARN" | "ERROR") => void;
 }) {
-  const [angles, setAngles] = useState<Angles>([0, 0, 0]);
   const [targets, setTargets] = useState<Angles>([0, 0, 0]);
   const [jog, setJog] = useState("1");
   const [optimizing, setOptimizing] = useState(false);
-
-  useEffect(() => {
-    if (!online) return;
-    let alive = true;
-    const tick = async () => {
-      try {
-        const s = await api.motorsGet();
-        if (alive) setAngles(s.angles);
-      } catch { /* ignore */ }
-    };
-    tick();
-    const id = setInterval(tick, 300);
-    return () => { alive = false; clearInterval(id); };
-  }, [online]);
 
   const setTarget = (i: number, v: number) =>
     setTargets((prev) => prev.map((a, j) => (j === i ? v : a)) as Angles);
 
   const move = async (paddle: 1 | 2 | 3, angle: number) => {
     const clamped = Math.max(0, Math.min(160, angle));
-    setAngles((prev) => prev.map((a, j) => (j === paddle - 1 ? clamped : a)) as Angles);
     setTarget(paddle - 1, clamped);
     onLog(`Paddle ${paddle} → ${clamped.toFixed(1)}°`);
     try { await api.motorMove(paddle, clamped); } catch (e: any) { onLog(`Paddle ${paddle} move failed: ${e}`, "WARN"); }
@@ -52,9 +38,9 @@ export function PolarizationTab({
     try { await api.motorHome(paddle); } catch (e: any) { onLog(`Paddle ${paddle} home failed: ${e}`, "WARN"); }
   };
 
-  const jogPaddle = async (paddle: 1 | 2 | 3, dir: 1 | -1) => {
+  const jogPaddle = (paddle: 1 | 2 | 3, dir: 1 | -1) => {
     const step = parseFloat(jog) || 1;
-    const cur = angles[paddle - 1];
+    const cur = state.angles[paddle - 1];
     move(paddle, cur + dir * step);
   };
 
@@ -102,7 +88,7 @@ export function PolarizationTab({
             <CardHeader>
               <CardTitle>Paddle {p}</CardTitle>
               <span className="text-3xl font-light tabular-nums">
-                {angles[idx].toFixed(1)}<span className="text-base text-faint ml-1">°</span>
+                {state.angles[idx].toFixed(1)}<span className="text-base text-faint ml-1">°</span>
               </span>
             </CardHeader>
             <CardBody>
