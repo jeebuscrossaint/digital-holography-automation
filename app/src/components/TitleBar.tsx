@@ -74,7 +74,7 @@ export function TitleBar({
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}
         >
-          Photonic Lantern Holography
+          Digital Holography
         </span>
       </div>
 
