@@ -15,6 +15,10 @@ app/src-tauri/Cargo.lock
 build/
 app/src-tauri/binaries/
 
+# Lab-mate reference drops (kept locally for diffing, not in repo)
+Caleb Mode Playground/
+Code That Connects To Other Code/
+
 # C extensions
 *.so
 

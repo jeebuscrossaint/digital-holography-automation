@@ -74,29 +74,39 @@ class xCam:
                 # Output the product id and serial and exposure time
                 print(f"Controlling camera with PID: 0x{int(self.pid):X}, SER: {self.ser}, ExposureTime: {self.exposure_time}")
             
-            # Calibration is OPTIONAL. The previous code passed flag=2
-            # which is XLC_RFU_1 (reserved / undefined) — likely the
-            # reason every frame came back as zeros. Skip calibration
-            # by default; enable via env var XENETH_LOAD_CAL=1 with the
-            # CORRECT flag (XLC_StartSoftwareCorrection = 1).
+            # The camera returns all-zero frames when no calibration is
+            # loaded — confirmed empirically against a lab mate's working
+            # version of this driver. Always load the cal file. Pick the
+            # one matching the current exposure (we ship 500 / 1000 /
+            # 5000 / 10000 µs variants) and fall back to 500 µs.
             import os as _os
-            if _os.environ.get("XENETH_LOAD_CAL") == "1":
+            cal_dir = _os.path.join(_os.path.dirname(__file__), 'calibration')
+            sys_cal_dir = r"C:\Program Files\Xeneth\Calibrations"
+            exp_us = int(round(float(self.exposure_time)))
+            choices = [exp_us, 500, 1000, 5000, 10000]
+            cal_path = None
+            for us in choices:
+                for d in (cal_dir, sys_cal_dir):
+                    p = _os.path.join(d, f"XC-(10-06-2021)-{us}us_14931.xca")
+                    if _os.path.exists(p):
+                        cal_path = p; break
+                if cal_path: break
+            if cal_path:
+                # flag=2 is what the lab mate's working code uses; the
+                # enum file labels it RFU_1 but the SDK accepts it.
                 try:
-                    _cal = _os.path.join(_os.path.dirname(__file__),
-                                         'calibration',
-                                         'XC-(10-06-2021)-500us_14931.xca')
-                    self.cam.load_calibration(
-                        _cal, XLoadCalibrationFlags.XLC_StartSoftwareCorrection)
-                    print(f"Calibration loaded: {_cal}")
+                    self.cam.load_calibration(cal_path, 2)
+                    print(f"Calibration loaded: {cal_path}")
                 except Exception as e:
-                    print(f"Calibration not loaded (continuing without): {e}")
+                    print(f"Calibration load FAILED ({cal_path}): {e}")
+            else:
+                print("No calibration file found — camera will likely return zero frames")
 
             self.buffer = self.cam.create_buffer()
             if self.cam.is_initialized:
                 print("Start capturing")
                 self.cam.start_capture()
-                # Discard the first few frames — the sensor & DMA pipeline
-                # need a moment to flush after StartCapture
+                # Brief warmup so the first user-visible frame is real
                 time.sleep(0.2)
                 for _ in range(3):
                     try:
