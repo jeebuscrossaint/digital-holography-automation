@@ -1,12 +1,12 @@
 hardware:
   laser:
     gpib_address: GPIB0::24::INSTR
-    power_uw: 208
+    power_uw: 500
     power_unit: UW
   camera:
-    url: cam://0?fg=none
+    url: cam://0?fg=XFrameGrabberNative
     calibration_file: ./hardware/calibration/XC-(10-06-2021)-500us_14931.xca
-    exposure_time: 500
+    exposure_time: 1000
     model: Bobcat 320 GigE
     interface: GigE Vision (Ethernet-to-USB adapter)
   fiber_switch:
