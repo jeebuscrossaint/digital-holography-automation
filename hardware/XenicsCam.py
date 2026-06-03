@@ -54,12 +54,46 @@ def dev_discovery():
 
     return devices[val].url
 
+def pick_real_camera_url() -> str:
+    """Enumerate cameras, skip the Virtual camera (serial 0), return the
+    URL of the first real one. Falls back to "cam://0" if enumeration
+    fails entirely.
+
+    Per Xeneth SDK docs:
+      - `cam://N` picks device by index (might land on the Virtual cam)
+      - `?fg=none` puts the API in command-and-control mode with NO
+        framegrabbing (which is why our frames were all zeros)
+      - omitting fg uses the native framegrabber, which is what we want
+    """
+    try:
+        devices = enumerate_devices(XEnumerationFlags.XEF_EnableAll)
+        for d in devices:
+            try:
+                ser = int(d.serial)
+            except (TypeError, ValueError):
+                ser = 0
+            # Virtual camera has serial 0
+            if ser != 0:
+                return d.url
+        if devices:
+            return devices[0].url
+    except Exception:
+        pass
+    return "cam://0"
+
+
 class xCam:
     def __init__(self, url=None):
         self.cam = XCamera()
         self.init_log: list[str] = []   # captured init diagnostics for the GUI
-        if not url:
-            url = dev_discovery()
+
+        # If no URL given, OR the caller passed the broken default
+        # cam://0?fg=none, pick a real (non-Virtual) device.
+        if not url or "fg=none" in str(url) or url == "cam://0":
+            real = pick_real_camera_url()
+            if real != url:
+                self.init_log.append(f"Camera URL → {real} (was: {url})")
+            url = real
 
         # open camera and start capturing
         try:

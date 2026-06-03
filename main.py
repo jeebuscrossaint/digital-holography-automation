@@ -641,17 +641,18 @@ class HolographyApp:
 
     def _camera_preview_loop(self):
         """Continuous live preview — grab a frame ~10× per second whenever
-        the camera is connected. Xeneth has its own preview window that
-        works the same way; without this our canvas would only ever show
-        the single frame captured at connect time (which is usually empty
-        because the sensor's still ramping up)."""
+        the camera is connected. Surfaces the first frame's stats, OR a
+        warning if the SDK keeps returning no frames (so the user can
+        see the difference between 'no light' and 'no frames at all')."""
         import numpy as np
+        null_streak = 0
         while not self._stop_background.is_set():
             cam = self.camera
             if cam is not None and not self.experiment_running:
                 try:
                     frame = cam.getFrame()
                     if frame is not None:
+                        null_streak = 0
                         if not self._cam_first_frame_logged:
                             arr = np.asarray(frame)
                             self.msg_queue.put({
@@ -664,6 +665,18 @@ class HolographyApp:
                             })
                             self._cam_first_frame_logged = True
                         self.msg_queue.put({"type": "frame", "data": frame})
+                    else:
+                        null_streak += 1
+                        if null_streak == 30 and not self._cam_first_frame_logged:
+                            self.msg_queue.put({
+                                "type": "log",
+                                "text": ("Camera getFrame keeps returning no frame. "
+                                         "Likely causes: framegrabber disabled (URL "
+                                         "had ?fg=none) or the SDK picked the Virtual "
+                                         "camera."),
+                                "level": "WARN",
+                            })
+                            self._cam_first_frame_logged = True
                 except Exception as e:
                     if not self._cam_first_frame_logged:
                         self.msg_queue.put({
@@ -673,10 +686,9 @@ class HolographyApp:
                         })
                         self._cam_first_frame_logged = True
             else:
-                # Reset the one-shot log when camera disconnects so reconnects
-                # also get a diagnostic line
                 if cam is None:
                     self._cam_first_frame_logged = False
+                    null_streak = 0
             self._stop_background.wait(0.1)
 
     def _sync_paddle_targets_from_hw(self):
