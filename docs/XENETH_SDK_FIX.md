@@ -51,7 +51,7 @@ If you can find where `xeneth64.dll` actually is:
 Get-ChildItem C:\ -Recurse -Filter xeneth64.dll -ErrorAction SilentlyContinue
 
 # If found, copy to project
-Copy-Item "path\to\xeneth64.dll" "C:\Users\amarnath\Programming\doohickeydinklecombobertothe12thfactorial\"
+Copy-Item "path\to\xeneth64.dll" "C:\Users\amarnath\Programming\digital-holography-automation\"
 ```
 
 ## Why This Happened

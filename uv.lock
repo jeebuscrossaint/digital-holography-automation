@@ -54,7 +54,7 @@ wheels = [
 ]
 
 [[package]]
-name = "doohickeydinklecombobertothe12thfactorial"
+name = "digital-holography-automation"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

@@ -53,7 +53,7 @@ that needs the Xenics filter driver and Xeneth runtime.
 
 ```sh
 git clone <repo-url>
-cd doohickeydinklecombobertothe12thfactorial
+cd digital-holography-automation
 # Install uv if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
 .\start-tauri.bat
 ```
