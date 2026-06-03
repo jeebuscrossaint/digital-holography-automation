@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Light theme — soft warm-neutral background, blue accent */
+  --bg:       0 0% 99%;
+  --panel:    0 0% 96%;
+  --elevated: 0 0% 100%;
+  --border:   0 0% 88%;
+  --ink:      222 22% 12%;
+  --soft:     222 12% 32%;
+  --faint:    222 8% 52%;
+  --accent:   217 91% 55%;
+  --ok:       145 63% 42%;
+  --warn:     38 92% 50%;
+  --bad:      0 72% 51%;
+  --radius:   0.7rem;
+  color-scheme: light;
+}
+
+.dark {
+  /* Dark theme — neutral charcoal, same blue accent slightly brighter */
+  --bg:       222 16% 8%;
+  --panel:    222 14% 11%;
+  --elevated: 222 12% 15%;
+  --border:   222 10% 22%;
+  --ink:      210 30% 96%;
+  --soft:     220 12% 75%;
+  --faint:    220 8% 55%;
+  --accent:   217 91% 62%;
+  --ok:       145 60% 55%;
+  --warn:     38 92% 60%;
+  --bad:      0 72% 62%;
+  color-scheme: dark;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-feature-settings: "cv11", "ss01", "ss03";
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle scrollbar */
+*::-webkit-scrollbar           { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track     { background: transparent; }
+*::-webkit-scrollbar-thumb     { background: hsl(var(--border)); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: hsl(var(--faint)); }
+
+/* Used by drag-to-move custom title bar */
+[data-tauri-drag-region] { -webkit-app-region: drag; }
+[data-tauri-no-drag]     { -webkit-app-region: no-drag; }

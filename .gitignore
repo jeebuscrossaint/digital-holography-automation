@@ -3,6 +3,14 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Tauri / frontend
+app/node_modules/
+app/dist/
+app/.vite/
+app/src-tauri/target/
+app/src-tauri/gen/
+app/src-tauri/Cargo.lock
+
 # C extensions
 *.so
 
