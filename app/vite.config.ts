@@ -18,6 +18,14 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: "127.0.0.1",
+    // Stop the Vite file watcher from following Cargo's output directory.
+    // Without this it EBUSY-crashes whenever cargo overwrites the DLL.
+    watch: {
+      ignored: [
+        "**/src-tauri/target/**",
+        "**/src-tauri/gen/**",
+      ],
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {
