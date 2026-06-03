@@ -36,59 +36,44 @@ CONFIG_FILE = str(SCRIPT_DIR / "experiment_config.yaml")
 
 # ── Scholarly palette, Estela-inspired (parchment + cinnabar accent) ────────
 
-LIGHT_PALETTE = {
-    "BG":        "#f4ecdc", "PANEL":    "#ede3cd", "SURFACE":  "#e3d7bc",
-    "BORDER":    "#d6c9ac", "INK":      "#1d1916", "INK_SOFT": "#4a4137",
-    "INK_FAINT": "#8c8071", "MUTED":    "#a09583", "ACCENT":   "#b94235",
-    "ACCENT_HI": "#a13a2e", "LOG_BG":   "#1b1814", "LOG_FG":   "#ece2cf",
-    "GREEN_OK":  "#5c8a3b", "AMBER":    "#b58a1a", "RED_BAD":  "#a93a2c",
-    "LOG_OK":    "#9ac26c", "LOG_WARN": "#e0b65a", "LOG_ERR":  "#e07a6b",
-    "LOG_DBG":   "#776e5e",
-    "PREVIEW_BG":"#0a0a0a",
+# Light (parchment)
+BG        = "#f4ecdc"   # page bg
+PANEL     = "#ede3cd"   # cards / sidebar
+SURFACE   = "#e3d7bc"   # raised surfaces (buttons resting)
+BORDER    = "#d6c9ac"
+INK       = "#1d1916"   # primary text
+INK_SOFT  = "#4a4137"   # secondary text
+INK_FAINT = "#8c8071"   # tertiary / mono labels
+MUTED     = "#a09583"
+ACCENT    = "#b94235"   # cinnabar red — links, primary buttons, hover
+ACCENT_HI = "#a13a2e"   # darker cinnabar for active/pressed
+LOG_BG    = "#1b1814"   # the log panel stays dark — looks like a terminal book
+LOG_FG    = "#ece2cf"
+GREEN_OK  = "#5c8a3b"
+AMBER     = "#b58a1a"
+RED_BAD   = "#a93a2c"
+
+HW_STATUS_COLOR = {
+    "connected":    GREEN_OK,
+    "disconnected": INK_FAINT,
+    "connecting":   AMBER,
+    "error":        RED_BAD,
 }
 
-DARK_PALETTE = {
-    "BG":        "#1b1815", "PANEL":    "#252220", "SURFACE":  "#2f2c29",
-    "BORDER":    "#3a3530", "INK":      "#ece2cf", "INK_SOFT": "#bdb4a3",
-    "INK_FAINT": "#7a7264", "MUTED":    "#6a6356", "ACCENT":   "#d35441",
-    "ACCENT_HI": "#b94235", "LOG_BG":   "#0f0d0b", "LOG_FG":   "#ece2cf",
-    "GREEN_OK":  "#88b46c", "AMBER":    "#deb35b", "RED_BAD":  "#d96856",
-    "LOG_OK":    "#9ac26c", "LOG_WARN": "#deb35b", "LOG_ERR":  "#d96856",
-    "LOG_DBG":   "#6a6356",
-    "PREVIEW_BG":"#0a0a0a",
+HW_STATUS_TEXT = {
+    "connected":    "Online",
+    "disconnected": "Offline",
+    "connecting":   "Connecting…",
+    "error":        "Error",
 }
 
-# Live module-level colors get overwritten when the theme is applied
-BG = PANEL = SURFACE = BORDER = INK = INK_SOFT = INK_FAINT = MUTED = ""
-ACCENT = ACCENT_HI = LOG_BG = LOG_FG = GREEN_OK = AMBER = RED_BAD = ""
-HW_STATUS_COLOR = {}
-HW_STATUS_TEXT  = {"connected": "Online", "disconnected": "Offline",
-                   "connecting": "Connecting…", "error": "Error"}
-LOG_TAG_COLOR   = {}
-
-
-def _apply_palette_globals(p):
-    """Mutate the module-level color globals to match palette p."""
-    global BG, PANEL, SURFACE, BORDER, INK, INK_SOFT, INK_FAINT, MUTED
-    global ACCENT, ACCENT_HI, LOG_BG, LOG_FG, GREEN_OK, AMBER, RED_BAD
-    global HW_STATUS_COLOR, LOG_TAG_COLOR
-    BG, PANEL, SURFACE, BORDER = p["BG"], p["PANEL"], p["SURFACE"], p["BORDER"]
-    INK, INK_SOFT, INK_FAINT, MUTED = p["INK"], p["INK_SOFT"], p["INK_FAINT"], p["MUTED"]
-    ACCENT, ACCENT_HI = p["ACCENT"], p["ACCENT_HI"]
-    LOG_BG, LOG_FG = p["LOG_BG"], p["LOG_FG"]
-    GREEN_OK, AMBER, RED_BAD = p["GREEN_OK"], p["AMBER"], p["RED_BAD"]
-    HW_STATUS_COLOR = {
-        "connected": GREEN_OK, "disconnected": INK_FAINT,
-        "connecting": AMBER,   "error": RED_BAD,
-    }
-    LOG_TAG_COLOR = {
-        "INFO":  None,         "OK":    p["LOG_OK"],
-        "WARN":  p["LOG_WARN"], "ERROR": p["LOG_ERR"],
-        "DEBUG": p["LOG_DBG"],
-    }
-
-
-_apply_palette_globals(LIGHT_PALETTE)
+LOG_TAG_COLOR = {
+    "INFO":  None,
+    "OK":    "#9ac26c",
+    "WARN":  "#e0b65a",
+    "ERROR": "#e07a6b",
+    "DEBUG": "#776e5e",
+}
 
 
 def _friendly_error(e: Exception) -> str:
@@ -353,207 +338,12 @@ class HolographyApp:
               background=[("selected", ACCENT)],
               foreground=[("selected", "#fbf5e7")])
 
-    # ── Window chrome (macOS-style) + light/dark theme toggle ────────────────
-
-    def _build_chrome(self):
-        self.root.overrideredirect(True)
-        if sys.platform == "win32":
-            self.root.after(10, self._fix_win_taskbar)
-
-        self._chrome = tk.Frame(self.root, bg=BG, height=36)
-        self._chrome.pack(fill="x", side="top")
-        self._chrome.pack_propagate(False)
-
-        # Traffic lights (top-left, real macOS placement)
-        lights_wrap = tk.Frame(self._chrome, bg=BG)
-        lights_wrap.pack(side="left", padx=14)
-
-        self._lights = tk.Canvas(lights_wrap, width=66, height=36,
-                                 bg=BG, highlightthickness=0, cursor="hand2")
-        self._lights.pack()
-
-        # (action, idle fill, hover fill, glyph)
-        self._light_specs = [
-            ("close", "#ff5f56", "#bf4039", "×"),
-            ("min",   "#ffbd2e", "#bf8e22", "−"),
-            ("max",   "#27c93f", "#1e9a30", "+"),
-        ]
-        self._light_items = {}
-        for i, (action, normal, _hover, _) in enumerate(self._light_specs):
-            cx = 11 + i * 22
-            oval = self._lights.create_oval(cx-6, 12, cx+6, 24,
-                                            fill=normal, outline="",
-                                            tags=action)
-            glyph = self._lights.create_text(cx, 18, text="",
-                                             fill="#3a1a14",
-                                             font=("Arial", 9, "bold"),
-                                             tags=action)
-            self._light_items[action] = (oval, glyph)
-
-        # Hover whole group: show glyphs; leave: hide
-        self._lights.bind("<Enter>", self._lights_show_glyphs)
-        self._lights.bind("<Leave>", self._lights_hide_glyphs)
-        for action, _, hover_fill, _g in self._light_specs:
-            def _enter(_e, t=action, h=hover_fill):
-                self._lights.itemconfig(self._light_items[t][0], fill=h)
-            def _leave(_e, t=action):
-                idle = next(n for a,n,_,_ in self._light_specs if a == t)
-                self._lights.itemconfig(self._light_items[t][0], fill=idle)
-            self._lights.tag_bind(action, "<Enter>", _enter)
-            self._lights.tag_bind(action, "<Leave>", _leave)
-            self._lights.tag_bind(action, "<Button-1>",
-                                   lambda _e, a=action: self._chrome_click(a))
-
-        # Center: faint app name (mono, like Estela's breadcrumb)
-        title = tk.Label(self._chrome, text="photonic lantern holography",
-                         bg=BG, fg=INK_FAINT, font=self._font_caps_small)
-        title.pack(side="left", padx=24)
-        self._chrome_title = title
-
-        # Theme toggle button (right)
-        self._theme_name = "light"
-        self._theme_btn = ttk.Button(self._chrome,
-                                      text="◐  Dark",
-                                      command=self._toggle_theme)
-        self._theme_btn.pack(side="right", padx=14, pady=6)
-
-        # Drag-to-move on chrome bar and title text
-        for w in (self._chrome, title):
-            w.bind("<ButtonPress-1>", self._chrome_drag_start)
-            w.bind("<B1-Motion>", self._chrome_drag_motion)
-            w.bind("<Double-Button-1>", lambda _e: self._chrome_click("max"))
-
-    def _lights_show_glyphs(self, _event):
-        for action, _, _, glyph in self._light_specs:
-            self._lights.itemconfig(self._light_items[action][1], text=glyph)
-
-    def _lights_hide_glyphs(self, _event):
-        for action, *_ in self._light_specs:
-            self._lights.itemconfig(self._light_items[action][1], text="")
-
-    def _chrome_click(self, action):
-        if action == "close":
-            self._on_close()
-        elif action == "min":
-            self._minimize()
-        elif action == "max":
-            self._toggle_maximize()
-
-    def _chrome_drag_start(self, event):
-        self._drag_dx = event.x_root - self.root.winfo_x()
-        self._drag_dy = event.y_root - self.root.winfo_y()
-        # Don't drag while zoomed
-        self._dragging = self.root.state() != "zoomed"
-
-    def _chrome_drag_motion(self, event):
-        if not getattr(self, "_dragging", False):
-            return
-        x = event.x_root - self._drag_dx
-        y = event.y_root - self._drag_dy
-        self.root.geometry(f"+{x}+{y}")
-
-    def _minimize(self):
-        if sys.platform == "win32":
-            import ctypes
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-            ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
-        else:
-            self.root.iconify()
-
-    def _toggle_maximize(self):
-        try:
-            if self.root.state() == "zoomed":
-                self.root.state("normal")
-            else:
-                self.root.state("zoomed")
-        except tk.TclError:
-            # Fallback on platforms without "zoomed" state
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-            self.root.geometry(f"{sw}x{sh}+0+0")
-
-    def _fix_win_taskbar(self):
-        """Make a borderless tk window show up properly in the Windows taskbar."""
-        try:
-            import ctypes
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-            GWL_EXSTYLE     = -20
-            WS_EX_APPWINDOW = 0x00040000
-            WS_EX_TOOLWINDOW = 0x00000080
-            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            style = (style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
-            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-            self.root.withdraw()
-            self.root.after(10, self.root.deiconify)
-        except Exception:
-            pass
-
-    # ── Light / dark theme switch ─────────────────────────────────────────────
-
-    def _toggle_theme(self):
-        self._theme_name = "dark" if self._theme_name == "light" else "light"
-        palette = DARK_PALETTE if self._theme_name == "dark" else LIGHT_PALETTE
-        _apply_palette_globals(palette)
-        self._setup_theme()
-        self._theme_btn.configure(
-            text=("☀  Light" if self._theme_name == "dark" else "◐  Dark"))
-        self._refresh_non_ttk_widgets()
-
-    def _refresh_non_ttk_widgets(self):
-        # Root + chrome
-        self.root.configure(bg=BG)
-        if hasattr(self, "_chrome"):
-            self._chrome.configure(bg=BG)
-            self._lights.configure(bg=BG)
-            for w in self._chrome.winfo_children():
-                try:
-                    w.configure(bg=BG)
-                except tk.TclError:
-                    pass
-            self._chrome_title.configure(bg=BG, fg=INK_FAINT)
-
-        # Activity log
-        if hasattr(self, "_log_widget"):
-            self._log_widget.configure(bg=LOG_BG, fg=LOG_FG, insertbackground=LOG_FG)
-            for tag, color in LOG_TAG_COLOR.items():
-                self._log_widget.tag_config(tag, foreground=color or LOG_FG)
-
-        # Camera preview canvas
-        if hasattr(self, "_canvas"):
-            try:
-                self._canvas.configure(bg=LIGHT_PALETTE["PREVIEW_BG"]
-                                       if self._theme_name == "light"
-                                       else DARK_PALETTE["PREVIEW_BG"],
-                                       highlightbackground=BORDER)
-            except tk.TclError:
-                pass
-
-        # Config tab scrollable canvas
-        for c in getattr(self, "_themed_canvases", []):
-            try:
-                c.configure(bg=BG)
-            except tk.TclError:
-                pass
-
-        # Hardware bar dots / status labels — re-tint via current statuses
-        if hasattr(self, "_hw_status_labels"):
-            for dev, lbl in self._hw_status_labels.items():
-                # Read current state from text and apply matching color
-                txt = lbl.cget("text").strip().lower()
-                for state, label in HW_STATUS_TEXT.items():
-                    if label.lower().startswith(txt[:7]):
-                        self._set_hw_dot(dev, state)
-                        break
-
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Custom window chrome (macOS-style traffic lights + theme toggle)
-        self._build_chrome()
-
         # Title row — "Photonic Lantern" + "Holography" (accent), with breadcrumb
         title_row = ttk.Frame(self.root)
-        title_row.pack(fill="x", padx=24, pady=(8, 0))
+        title_row.pack(fill="x", padx=24, pady=(18, 0))
         ttk.Label(title_row, text="Photonic Lantern  ",
                   style="Hero.TLabel").pack(side="left")
         ttk.Label(title_row, text="Holography",
@@ -1152,9 +942,6 @@ class HolographyApp:
 
         # Scrollable container — Canvas + inner Frame
         outer = tk.Canvas(tab, highlightthickness=0, background=BG)
-        if not hasattr(self, "_themed_canvases"):
-            self._themed_canvases = []
-        self._themed_canvases.append(outer)
         vsb   = ttk.Scrollbar(tab, orient="vertical", command=outer.yview)
         outer.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
