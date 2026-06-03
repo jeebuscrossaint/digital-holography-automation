@@ -56,10 +56,11 @@ class HPTunableLaserSource:
     # --- output ---
 
     def outputState(self, tf):
-        self.TL.write(f":SOUR:POW:STAT {'ON' if tf else 'OFF'}")
+        # 8168E listens to the short :OUTP:STAT form, not :SOUR:POW:STAT
+        self.TL.write(":OUTP:STAT 1" if tf else ":OUTP:STAT 0")
 
     def isOutputOn(self):
-        return self.TL.query(":SOUR:POW:STAT?").strip()
+        return self.TL.query(":OUTP:STAT?").strip()
 
     # --- power ---
 

@@ -1137,12 +1137,12 @@ class HolographyApp:
         try:
             from HPTunableLaserSource import HPTunableLaserSource
             self.laser = HPTunableLaserSource(addr)
+            # Only set the display unit so queries come back in µW.
+            # Don't touch power or output state — keep whatever the laser
+            # is currently set to. The user controls them from the Laser tab.
             self.laser.changePowerUnit(cfg_l.get("power_unit", "UW"))
-            power_uw = float(cfg_l.get("power_uw", 208))
-            self.laser.powerAmplitude(power_uw, "UW")
-            self.laser.outputState(True)
             self._hw("laser", "connected")
-            self._emit(f"✓ Laser  {addr}  output ON  ({power_uw:.0f} µW)", "OK")
+            self._emit(f"✓ Laser  {addr}", "OK")
             record_ok("Laser")
         except Exception as e:
             self._hw("laser", "error")
