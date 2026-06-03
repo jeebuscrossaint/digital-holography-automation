@@ -1,6 +1,7 @@
 #This works specifically an exclusively for the Orange Bobcat#
 import sys
 from datetime import datetime
+import os
 import time
 from xenics.xeneth import *
 from xenics.xeneth.errors import XenethAPIException, XenethException
@@ -56,6 +57,7 @@ def dev_discovery():
 class xCam:
     def __init__(self, url=None):
         self.cam = XCamera()
+        self.init_log: list[str] = []   # captured init diagnostics for the GUI
         if not url:
             url = dev_discovery()
 
@@ -74,33 +76,20 @@ class xCam:
                 # Output the product id and serial and exposure time
                 print(f"Controlling camera with PID: 0x{int(self.pid):X}, SER: {self.ser}, ExposureTime: {self.exposure_time}")
             
-            # The camera returns all-zero frames when no calibration is
-            # loaded — confirmed empirically against a lab mate's working
-            # version of this driver. Always load the cal file. Pick the
-            # one matching the current exposure (we ship 500 / 1000 /
-            # 5000 / 10000 µs variants) and fall back to 500 µs.
-            import os as _os
-            cal_dir = _os.path.join(_os.path.dirname(__file__), 'calibration')
-            sys_cal_dir = r"C:\Program Files\Xeneth\Calibrations"
-            exp_us = int(round(float(self.exposure_time)))
-            choices = [exp_us, 500, 1000, 5000, 10000]
-            cal_path = None
-            for us in choices:
-                for d in (cal_dir, sys_cal_dir):
-                    p = _os.path.join(d, f"XC-(10-06-2021)-{us}us_14931.xca")
-                    if _os.path.exists(p):
-                        cal_path = p; break
-                if cal_path: break
-            if cal_path:
-                # flag=2 is what the lab mate's working code uses; the
-                # enum file labels it RFU_1 but the SDK accepts it.
+            # The Bobcat-320-GigE stores its calibration ON the camera
+            # ("Calibration data: (Camera memory)" in Xeneth's connection
+            # setup). Loading a .xca file from disk overrides that with
+            # potentially wrong data — skip it unless explicitly asked
+            # for via the XENETH_LOAD_CAL_PATH env var.
+            cal_override = os.environ.get("XENETH_LOAD_CAL_PATH")
+            if cal_override:
                 try:
-                    self.cam.load_calibration(cal_path, 2)
-                    print(f"Calibration loaded: {cal_path}")
+                    self.cam.load_calibration(cal_override, 2)
+                    self.init_log.append(f"Calibration file loaded: {cal_override}")
                 except Exception as e:
-                    print(f"Calibration load FAILED ({cal_path}): {e}")
+                    self.init_log.append(f"Calibration load FAILED: {e}")
             else:
-                print("No calibration file found — camera will likely return zero frames")
+                self.init_log.append("Using camera-memory calibration (no file loaded)")
 
             self.buffer = self.cam.create_buffer()
             if self.cam.is_initialized:

@@ -1173,12 +1173,9 @@ class HolographyApp:
             ser = int(self.camera.ser) if self.camera.ser else "?"
             self._hw("camera", "connected")
             self._emit(f"✓ Camera  Xenics Bobcat 320 GigE  SER:{ser}", "OK")
+            for line in getattr(self.camera, "init_log", []):
+                self._emit(f"  {line}", "DEBUG")
             record_ok("Camera")
-            frame = self.camera.getFrame()
-            if frame is not None:
-                self.msg_queue.put({"type": "frame", "data": frame})
-            else:
-                self._emit("  (no frame yet — need light on sensor)", "DEBUG")
         except Exception as e:
             self._hw("camera", "error")
             self._emit(f"✗ Camera — {_friendly_error(e)}", "WARN")
