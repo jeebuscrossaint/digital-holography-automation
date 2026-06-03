@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TitleBar } from "./components/TitleBar";
 import { HardwareBar } from "./components/HardwareBar";
 import { LogPanel, LogEntry } from "./components/LogPanel";
@@ -27,6 +28,17 @@ export default function App() {
     },
     []
   );
+
+  // Reveal the (hidden) Tauri window as soon as the React tree is mounted
+  useEffect(() => {
+    (async () => {
+      try {
+        const win = getCurrentWindow();
+        await win.show();
+        await win.setFocus();
+      } catch { /* fine in browser dev */ }
+    })();
+  }, []);
 
   // Poll backend status
   useEffect(() => {
@@ -73,7 +85,7 @@ export default function App() {
       <div className="px-6 pt-5 pb-3 flex items-baseline gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Photonic Lantern Holography</h1>
         <span className="text-xs font-mono uppercase tracking-wider text-faint">
-          UCF · CREOL · NSF-2421299
+          UCF · CREOL
         </span>
       </div>
 

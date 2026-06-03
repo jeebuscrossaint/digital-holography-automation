@@ -2,36 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  /* Light theme — soft warm-neutral background, blue accent */
-  --bg:       0 0% 99%;
-  --panel:    0 0% 96%;
-  --elevated: 0 0% 100%;
-  --border:   0 0% 88%;
-  --ink:      222 22% 12%;
-  --soft:     222 12% 32%;
-  --faint:    222 8% 52%;
-  --accent:   217 91% 55%;
-  --ok:       145 63% 42%;
-  --warn:     38 92% 50%;
-  --bad:      0 72% 51%;
-  --radius:   0.7rem;
+/* Cleaner palette — Linear/Vercel-y. Almost-black darks, sharp whites,
+   one confident accent (blue-violet). Both themes use the same accent
+   so brand stays consistent on toggle. */
+
+:root, .light {
+  --bg:       0   0% 98%;
+  --panel:    0   0% 96%;
+  --elevated: 0   0% 100%;
+  --border:   0   0% 90%;
+  --ink:      222 25% 8%;
+  --soft:     222 9%  32%;
+  --faint:    222 6%  54%;
+  --accent:   248 90% 60%;
+  --accent-fg: 0  0% 100%;
+  --ok:       150 60% 38%;
+  --warn:     38  92% 47%;
+  --bad:      0   72% 50%;
+  --ring:     248 90% 60%;
+  --radius:   0.6rem;
   color-scheme: light;
 }
 
 .dark {
-  /* Dark theme — neutral charcoal, same blue accent slightly brighter */
-  --bg:       222 16% 8%;
-  --panel:    222 14% 11%;
-  --elevated: 222 12% 15%;
-  --border:   222 10% 22%;
-  --ink:      210 30% 96%;
-  --soft:     220 12% 75%;
-  --faint:    220 8% 55%;
-  --accent:   217 91% 62%;
-  --ok:       145 60% 55%;
-  --warn:     38 92% 60%;
-  --bad:      0 72% 62%;
+  --bg:       240 6%  4%;
+  --panel:    240 6%  8%;
+  --elevated: 240 6%  11%;
+  --border:   240 5%  17%;
+  --ink:      210 20% 96%;
+  --soft:     220 9%  72%;
+  --faint:    220 6%  52%;
+  --accent:   248 90% 68%;
+  --accent-fg: 0  0% 100%;
+  --ok:       150 55% 55%;
+  --warn:     38  92% 60%;
+  --bad:      0   72% 62%;
+  --ring:     248 90% 68%;
   color-scheme: dark;
 }
 
@@ -42,14 +48,19 @@ body {
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  background: hsl(var(--bg));
+  color: hsl(var(--ink));
 }
 
-/* Subtle scrollbar */
+/* Slim, subtle scrollbars */
 *::-webkit-scrollbar           { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track     { background: transparent; }
 *::-webkit-scrollbar-thumb     { background: hsl(var(--border)); border-radius: 8px; }
 *::-webkit-scrollbar-thumb:hover { background: hsl(var(--faint)); }
 
-/* Used by drag-to-move custom title bar */
+/* Tauri drag region helpers */
 [data-tauri-drag-region] { -webkit-app-region: drag; }
 [data-tauri-no-drag]     { -webkit-app-region: no-drag; }
+
+/* Hairline divider helper that respects DPR */
+.hairline { box-shadow: 0 1px 0 hsl(var(--border)); }

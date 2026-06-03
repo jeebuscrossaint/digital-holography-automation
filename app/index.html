@@ -1,11 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Photonic Lantern Holography</title>
+    <style>
+      /* Painted before any JS / CSS loads, so the window never flashes white.
+         Mirrors the dark-theme --bg in index.css. */
+      html, body { margin: 0; height: 100%; background: #0a0a0b; }
+      html.light, html.light body { background: #fbfbfb; }
+    </style>
+    <script>
+      // Apply persisted theme before React mounts to avoid a one-frame flip.
+      try {
+        const saved = localStorage.getItem("theme");
+        const sys   = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        const t = saved === "light" || saved === "dark" ? saved : sys;
+        document.documentElement.classList.toggle("dark",  t === "dark");
+        document.documentElement.classList.toggle("light", t === "light");
+      } catch {}
+    </script>
   </head>
-  <body class="bg-bg text-ink">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
