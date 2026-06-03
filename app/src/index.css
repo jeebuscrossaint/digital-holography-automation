@@ -6,38 +6,41 @@
    one confident accent (blue-violet). Both themes use the same accent
    so brand stays consistent on toggle. */
 
+/* macOS-aligned palette: systemBlue accent, semantic label colors,
+   ultra-thin separators (~10% opacity), sidebar background tinted
+   to feel like NSVisualEffectView .sidebar material. */
 :root, .light {
-  --bg:       0   0% 98%;
-  --panel:    0   0% 96%;
-  --elevated: 0   0% 100%;
-  --border:   0   0% 90%;
-  --ink:      222 25% 8%;
-  --soft:     222 9%  32%;
-  --faint:    222 6%  54%;
-  --accent:   248 90% 60%;
+  --bg:       0   0% 96%;       /* windowBackground */
+  --panel:    0   0% 92%;       /* sidebar tint */
+  --elevated: 0   0% 100%;      /* content background */
+  --border:   0   0% 87%;       /* separator (8% on white) */
+  --ink:      0   0% 0%;        /* primary label */
+  --soft:     0   0% 24%;       /* secondary label (~60% black) */
+  --faint:    0   0% 50%;       /* tertiary label */
+  --accent:   211 100% 50%;     /* systemBlue light: #007AFF */
   --accent-fg: 0  0% 100%;
-  --ok:       150 60% 38%;
-  --warn:     38  92% 47%;
-  --bad:      0   72% 50%;
-  --ring:     248 90% 60%;
-  --radius:   0.6rem;
+  --ok:       142 70% 35%;      /* systemGreen light */
+  --warn:     32  100% 47%;     /* systemOrange light */
+  --bad:      0   85% 50%;      /* systemRed light: #FF3B30-ish */
+  --ring:     211 100% 50%;
+  --radius:   6px;              /* macOS button radius */
   color-scheme: light;
 }
 
 .dark {
-  --bg:       240 6%  4%;
-  --panel:    240 6%  8%;
-  --elevated: 240 6%  11%;
-  --border:   240 5%  17%;
-  --ink:      210 20% 96%;
-  --soft:     220 9%  72%;
-  --faint:    220 6%  52%;
-  --accent:   248 90% 68%;
+  --bg:       0   0% 12%;       /* windowBackground dark */
+  --panel:    0   0% 16%;       /* sidebar (lighter than content) */
+  --elevated: 0   0% 18%;       /* content surfaces */
+  --border:   0   0% 26%;       /* separator (10% on dark) */
+  --ink:      0   0% 100%;      /* primary label */
+  --soft:     0   0% 75%;       /* secondary label */
+  --faint:    0   0% 55%;       /* tertiary label */
+  --accent:   212 100% 53%;     /* systemBlue dark: #0A84FF */
   --accent-fg: 0  0% 100%;
-  --ok:       150 55% 55%;
-  --warn:     38  92% 60%;
-  --bad:      0   72% 62%;
-  --ring:     248 90% 68%;
+  --ok:       142 50% 55%;      /* systemGreen dark */
+  --warn:     32  100% 60%;     /* systemOrange dark */
+  --bad:      4   85% 65%;      /* systemRed dark */
+  --ring:     212 100% 53%;
   color-scheme: dark;
 }
 

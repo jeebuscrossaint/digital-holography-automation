@@ -21,7 +21,7 @@ interface Props {
 
 const DOT: Record<ConnectionState, string> = {
   online:     "bg-ok",
-  offline:    "bg-faint/40",
+  offline:    "bg-faint/50",
   connecting: "bg-warn animate-pulse",
   error:      "bg-bad",
 };
@@ -35,9 +35,9 @@ export function OpticalPath({
   );
 
   return (
-    <div className="px-7 pt-1 pb-4">
+    <div className="px-7 pt-2 pb-3.5">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-faint">
+        <span className="text-[12px] font-semibold text-soft">
           Instrument chain
         </span>
         <div className="flex gap-1.5">
@@ -62,7 +62,7 @@ export function OpticalPath({
 
       <div className="flex items-stretch gap-0">
         <Tile
-          name="LASER"
+          name="Laser"
           state={status.laser}
           active={active === "laser"}
           onClick={() => onSelect("laser")}
@@ -76,7 +76,7 @@ export function OpticalPath({
         />
         <Link />
         <Tile
-          name="SWITCH"
+          name="Switch"
           state={status.switch}
           active={active === "switch"}
           onClick={() => onSelect("switch")}
@@ -86,26 +86,25 @@ export function OpticalPath({
         />
         <Link />
         <Tile
-          name="POLARIZATION"
+          name="Polarization"
           state={status.motors}
           active={active === "polarization"}
           onClick={() => onSelect("polarization")}
           big={
             motors.angles.length === 3 && motors.angles.some(a => a !== 0)
-              ? motors.angles.map(a => a.toFixed(0)).join("·")
+              ? motors.angles.map(a => a.toFixed(0)).join(" · ")
               : "—"
           }
           bigSuffix="°"
-          sub="MPC320"
-          mono
+          sub="Thorlabs MPC320"
         />
         <Link />
         <Tile
-          name="CAMERA"
+          name="Camera"
           state={status.camera}
           active={active === "run"}
           onClick={() => onSelect("run")}
-          big={status.camera === "online" ? "live" : "—"}
+          big={status.camera === "online" ? "Live" : "—"}
           bigSuffix=""
           sub="Bobcat 320 GigE"
         />
@@ -115,7 +114,7 @@ export function OpticalPath({
 }
 
 function Tile({
-  name, state, active, onClick, big, bigSuffix, sub, mono,
+  name, state, active, onClick, big, bigSuffix, sub,
 }: {
   name: string;
   state: ConnectionState;
@@ -124,51 +123,49 @@ function Tile({
   big: ReactNode;
   bigSuffix: string;
   sub: string;
-  mono?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        "group flex-1 text-left rounded-md border bg-elevated/70",
-        "p-3 transition-colors min-w-0",
+        "group flex-1 text-left rounded-[8px] p-3 transition-colors min-w-0",
         active
-          ? "border-accent/70 shadow-[0_0_0_1px_hsl(var(--accent)/0.4)_inset]"
-          : "border-border/60 hover:border-border"
+          ? "bg-accent/10 shadow-[0_0_0_1px_hsl(var(--accent)/0.5)]"
+          : "bg-elevated/70 hover:bg-elevated shadow-[0_0_0_0.5px_hsl(var(--border))]"
       )}
     >
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] font-mono tracking-[0.16em] text-faint">
+        <span className={cn(
+          "text-[12px] font-semibold",
+          active ? "text-accent" : "text-soft"
+        )}>
           {name}
         </span>
         <span className={cn("h-1.5 w-1.5 rounded-full", DOT[state])} />
       </div>
 
       <div className={cn(
-        "text-[22px] leading-none tabular-nums truncate",
-        state !== "online" && "text-faint",
-        mono && "font-mono"
+        "text-[20px] leading-none tabular-nums truncate -tracking-[0.01em]",
+        state !== "online" && "text-faint"
       )}>
         {big}
         {bigSuffix && (
-          <span className="text-xs text-faint ml-1.5 font-sans">{bigSuffix}</span>
+          <span className="text-[12px] text-faint ml-1.5">{bigSuffix}</span>
         )}
       </div>
 
-      <div className="text-[10px] mt-2 text-faint truncate">{sub}</div>
+      <div className="text-[11px] mt-1.5 text-faint truncate">{sub}</div>
     </button>
   );
 }
 
-/** Thin dash between tiles. Not an arrow, not a cable — just a quiet
- *  visual continuation. */
 function Link() {
   return (
-    <div className="self-center px-2 text-faint/50 select-none" aria-hidden>
-      <svg width="22" height="2" viewBox="0 0 22 2">
+    <div className="self-center px-2 text-faint/40 select-none" aria-hidden>
+      <svg width="18" height="2" viewBox="0 0 18 2">
         <line
-          x1="0" y1="1" x2="22" y2="1"
-          stroke="currentColor" strokeDasharray="2 3" strokeWidth="1"
+          x1="0" y1="1" x2="18" y2="1"
+          stroke="currentColor" strokeWidth="1"
         />
       </svg>
     </div>

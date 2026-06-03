@@ -35,8 +35,8 @@ export function LogPanel({
       className="flex flex-col h-full border-l border-border/60 w-[320px] shrink-0"
       style={{ background: "hsl(var(--panel) / 0.4)" }}
     >
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-faint">
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <span className="text-[12px] font-semibold text-soft">
           Activity
         </span>
         <button

@@ -108,16 +108,11 @@ export default function App() {
         <Sidebar active={tab} onSelect={setTab} />
 
         <main className="flex-1 min-w-0 flex flex-col">
-          {/* page header */}
+          {/* page header — macOS "large title" style */}
           <div className="px-7 pt-5 pb-3">
-            <div className="flex items-baseline gap-3">
-              <h1 className="text-[17px] font-semibold tracking-[-0.02em]">
-                {pageTitle}
-              </h1>
-              <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-faint">
-                UCF · CREOL
-              </span>
-            </div>
+            <h1 className="text-[22px] font-bold tracking-[-0.022em] text-ink">
+              {pageTitle}
+            </h1>
           </div>
 
           <OpticalPath
