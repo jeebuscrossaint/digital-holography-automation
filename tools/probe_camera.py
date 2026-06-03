@@ -68,6 +68,15 @@ def try_url(url: str) -> None:
         buf = cam.create_buffer()
         cam.start_capture()
         print(f"  is_capturing = {cam.is_capturing}")
+
+        # GigE Vision cameras need an explicit AcquisitionStart action
+        # to actually start streaming packets. start_capture() only sets
+        # up the SDK-side receiver.
+        try:
+            cam.set_property_value("AcquisitionStart", 1)
+            print("  AcquisitionStart fired")
+        except Exception as e:
+            print(f"  AcquisitionStart failed: {e}")
         time.sleep(0.3)
 
         for i in range(3):
