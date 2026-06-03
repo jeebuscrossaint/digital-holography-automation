@@ -34,30 +34,20 @@ for p in (str(SCRIPT_DIR / "hardware"), str(SCRIPT_DIR / "lib")):
 
 CONFIG_FILE = str(SCRIPT_DIR / "experiment_config.yaml")
 
-# ── Scholarly palette, Estela-inspired (parchment + cinnabar accent) ────────
+# ── Windows 11 Fluent colors (used for status indicators + log) ──────────────
+# Theme itself (backgrounds, buttons, tabs, etc.) comes from sv-ttk.
 
-# Light (parchment)
-BG        = "#f4ecdc"   # page bg
-PANEL     = "#ede3cd"   # cards / sidebar
-SURFACE   = "#e3d7bc"   # raised surfaces (buttons resting)
-BORDER    = "#d6c9ac"
-INK       = "#1d1916"   # primary text
-INK_SOFT  = "#4a4137"   # secondary text
-INK_FAINT = "#8c8071"   # tertiary / mono labels
-MUTED     = "#a09583"
-ACCENT    = "#b94235"   # cinnabar red — links, primary buttons, hover
-ACCENT_HI = "#a13a2e"   # darker cinnabar for active/pressed
-LOG_BG    = "#1b1814"   # the log panel stays dark — looks like a terminal book
-LOG_FG    = "#ece2cf"
-GREEN_OK  = "#5c8a3b"
-AMBER     = "#b58a1a"
-RED_BAD   = "#a93a2c"
+ACCENT_GREEN  = "#16C60C"   # Windows accent: success
+ACCENT_AMBER  = "#FFB900"   # Windows accent: caution
+ACCENT_RED    = "#E81123"   # Windows accent: danger
+ACCENT_BLUE   = "#0078D4"   # Windows accent: info
+MUTED         = "#888888"
 
 HW_STATUS_COLOR = {
-    "connected":    GREEN_OK,
-    "disconnected": INK_FAINT,
-    "connecting":   AMBER,
-    "error":        RED_BAD,
+    "connected":    ACCENT_GREEN,
+    "disconnected": MUTED,
+    "connecting":   ACCENT_AMBER,
+    "error":        ACCENT_RED,
 }
 
 HW_STATUS_TEXT = {
@@ -68,11 +58,11 @@ HW_STATUS_TEXT = {
 }
 
 LOG_TAG_COLOR = {
-    "INFO":  None,
-    "OK":    "#9ac26c",
-    "WARN":  "#e0b65a",
-    "ERROR": "#e07a6b",
-    "DEBUG": "#776e5e",
+    "INFO":  None,             # default theme foreground
+    "OK":    ACCENT_GREEN,
+    "WARN":  ACCENT_AMBER,
+    "ERROR": ACCENT_RED,
+    "DEBUG": MUTED,
 }
 
 
@@ -175,190 +165,49 @@ class HolographyApp:
     # ── Theme + fonts ─────────────────────────────────────────────────────────
 
     def _setup_theme(self):
-        """Scholarly tkinter palette + typography (Estela-inspired)."""
-        self.root.configure(bg=BG)
+        # Sun Valley (Windows 11 Fluent) — affects ttk widgets globally
+        try:
+            import sv_ttk
+            sv_ttk.set_theme("dark")
+        except Exception:
+            pass  # falls back to default theme; app still works
+
         families = set(tkfont.families(self.root))
+        body    = "Segoe UI Variable Text"    if "Segoe UI Variable Text"    in families else "Segoe UI"
+        display = "Segoe UI Variable Display" if "Segoe UI Variable Display" in families else "Segoe UI"
+        small   = "Segoe UI Variable Small"   if "Segoe UI Variable Small"   in families else "Segoe UI"
+        mono    = "Cascadia Mono"             if "Cascadia Mono"             in families else "Consolas"
 
-        def pick(*candidates):
-            for c in candidates:
-                if c in families:
-                    return c
-            return candidates[-1]
+        self._font_body    = (body,    10)
+        self._font_body_bold = (body,  10, "bold")
+        self._font_section = (body,    11, "bold")
+        self._font_title   = (display, 18)
+        self._font_subtitle = (display, 11)
+        self._font_metric  = (display, 13)
+        self._font_small   = (small,    9)
+        self._font_mono    = (mono,     9)
 
-        # Serif for hero text, sans for body, mono for caps labels / log
-        serif = pick("EB Garamond", "Cormorant Garamond",
-                     "Source Serif Pro", "Source Serif 4", "Crimson Pro",
-                     "Lora", "Cambria", "Georgia")
-        body  = pick("Inter", "Segoe UI Variable Text", "Segoe UI")
-        mono  = pick("JetBrains Mono", "Cascadia Mono", "Cascadia Code",
-                     "IBM Plex Mono", "Iosevka", "Consolas")
+        self.root.option_add("*Font", f"{{{body}}} 10")
 
-        self._font_serif_hero  = (serif, 22, "bold")
-        self._font_serif_title = (serif, 16, "bold")
-        self._font_body        = (body,  11)
-        self._font_body_bold   = (body,  11, "bold")
-        self._font_section     = (body,  12, "bold")
-        self._font_metric      = (serif, 26)
-        self._font_small       = (body,   9)
-        self._font_caps        = (mono,  10)    # SECTION LABELS
-        self._font_caps_small  = (mono,   8)
-        self._font_mono        = (mono,  10)
-        # Backwards-compat names a couple of tab builders use
-        self._font_title       = self._font_serif_title
-
-        self.root.option_add("*Font", f"{{{body}}} 11")
-        self.root.option_add("*selectBackground", ACCENT)
-        self.root.option_add("*selectForeground", BG)
-
+        # The Treeview heading font isn't picked up from option_add — set explicitly
         s = ttk.Style()
-        s.theme_use("clam")
-
-        # ── frames + labels ────────────────────────────────────────────
-        s.configure(".",
-                    background=BG, foreground=INK,
-                    fieldbackground=PANEL, bordercolor=BORDER,
-                    lightcolor=PANEL, darkcolor=PANEL,
-                    troughcolor=PANEL, focuscolor=ACCENT)
-        s.configure("TFrame",         background=BG)
-        s.configure("Panel.TFrame",   background=PANEL)
-        s.configure("TLabel",         background=BG, foreground=INK)
-        s.configure("Faint.TLabel",   background=BG, foreground=INK_FAINT)
-        s.configure("Caps.TLabel",    background=BG, foreground=INK_FAINT,
-                                       font=self._font_caps)
-        s.configure("Hero.TLabel",    background=BG, foreground=INK,
-                                       font=self._font_serif_hero)
-        s.configure("Accent.TLabel",  background=BG, foreground=ACCENT,
-                                       font=self._font_serif_hero)
-        s.configure("Title.TLabel",   background=BG, foreground=INK,
-                                       font=self._font_serif_title)
-        s.configure("Section.TLabel", background=BG, foreground=INK,
-                                       font=self._font_section)
-
-        # ── buttons ────────────────────────────────────────────────────
-        s.configure("TButton",
-                    background=SURFACE, foreground=INK,
-                    bordercolor=BORDER, lightcolor=SURFACE, darkcolor=BORDER,
-                    relief="flat", padding=(14, 8),
-                    font=self._font_body)
-        s.map("TButton",
-              background=[("active", PANEL), ("pressed", BORDER),
-                          ("disabled", PANEL)],
-              foreground=[("disabled", INK_FAINT)])
-
-        s.configure("Accent.TButton",
-                    background=ACCENT, foreground="#fbf5e7",
-                    bordercolor=ACCENT, lightcolor=ACCENT, darkcolor=ACCENT_HI,
-                    relief="flat", padding=(16, 8),
-                    font=self._font_body_bold)
-        s.map("Accent.TButton",
-              background=[("active", ACCENT_HI), ("pressed", ACCENT_HI),
-                          ("disabled", SURFACE)],
-              foreground=[("disabled", INK_FAINT)])
-
-        s.configure("Stop.TButton",
-                    background=PANEL, foreground=RED_BAD,
-                    bordercolor=RED_BAD, padding=(14, 8),
-                    font=self._font_body_bold)
-        s.map("Stop.TButton",
-              background=[("active", "#f0e0d6")])
-
-        # ── notebook (tabs) — underline style ──────────────────────────
-        s.configure("TNotebook", background=BG, borderwidth=0,
-                    tabmargins=[0, 8, 0, 0])
-        s.configure("TNotebook.Tab",
-                    background=BG, foreground=INK_SOFT,
-                    bordercolor=BG, lightcolor=BG, darkcolor=BG,
-                    padding=(18, 8), font=self._font_caps)
-        s.map("TNotebook.Tab",
-              background=[("selected", BG), ("active", BG)],
-              foreground=[("selected", ACCENT), ("active", INK)],
-              bordercolor=[("selected", ACCENT)])
-        s.layout("TNotebook.Tab", [
-            ("Notebook.tab", {
-                "sticky": "nswe",
-                "children": [
-                    ("Notebook.padding", {
-                        "side": "top", "sticky": "nswe",
-                        "children": [
-                            ("Notebook.label", {"side": "top", "sticky": ""})
-                        ]
-                    })
-                ]
-            })
-        ])
-
-        # ── entries / spinbox / scale ──────────────────────────────────
-        s.configure("TEntry",
-                    fieldbackground=PANEL, foreground=INK,
-                    bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
-                    insertcolor=ACCENT, padding=6,
-                    font=self._font_mono)
-        s.configure("TSpinbox",
-                    fieldbackground=PANEL, foreground=INK,
-                    bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
-                    arrowcolor=INK_SOFT, padding=4,
-                    font=self._font_mono)
-        s.configure("TScale", background=BG, troughcolor=PANEL,
-                    bordercolor=BORDER)
-        s.configure("Horizontal.TProgressbar",
-                    background=ACCENT, troughcolor=PANEL,
-                    bordercolor=BORDER, lightcolor=ACCENT, darkcolor=ACCENT_HI)
-
-        # ── label frames (cards) ───────────────────────────────────────
-        s.configure("TLabelframe",
-                    background=BG, bordercolor=BORDER,
-                    lightcolor=BORDER, darkcolor=BORDER,
-                    relief="solid", borderwidth=1, padding=14)
-        s.configure("TLabelframe.Label",
-                    background=BG, foreground=INK_FAINT,
-                    font=self._font_caps)
-
-        # ── radio / separator / scrollbar ──────────────────────────────
-        s.configure("TRadiobutton", background=BG, foreground=INK,
-                                    indicatorcolor=PANEL,
-                                    font=self._font_body)
-        s.map("TRadiobutton",
-              indicatorcolor=[("selected", ACCENT)])
-        s.configure("TSeparator", background=BORDER)
-        s.configure("TScrollbar",
-                    background=PANEL, troughcolor=BG,
-                    bordercolor=BG, arrowcolor=INK_SOFT,
-                    relief="flat")
-        s.map("TScrollbar", background=[("active", SURFACE)])
-
-        # ── treeview ───────────────────────────────────────────────────
-        s.configure("Treeview",
-                    background=PANEL, fieldbackground=PANEL,
-                    foreground=INK, bordercolor=BORDER,
-                    rowheight=28, font=self._font_body)
-        s.configure("Treeview.Heading",
-                    background=BG, foreground=INK_FAINT,
-                    bordercolor=BORDER, font=self._font_caps)
-        s.map("Treeview",
-              background=[("selected", ACCENT)],
-              foreground=[("selected", "#fbf5e7")])
+        s.configure("Treeview",          rowheight=26, font=self._font_body)
+        s.configure("Treeview.Heading",  font=self._font_body_bold)
+        # Reserve a card-ish frame style for grouped sections
+        s.configure("Card.TFrame")  # sv-ttk already styles ttk.Frame nicely
 
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Title row — "Photonic Lantern" + "Holography" (accent), with breadcrumb
+        # Title row
         title_row = ttk.Frame(self.root)
-        title_row.pack(fill="x", padx=24, pady=(18, 0))
-        ttk.Label(title_row, text="Photonic Lantern  ",
-                  style="Hero.TLabel").pack(side="left")
-        ttk.Label(title_row, text="Holography",
-                  style="Accent.TLabel").pack(side="left")
-        ttk.Label(title_row, text="UCF · CREOL · NSF-2421299",
-                  font=self._font_caps_small,
-                  foreground=INK_FAINT, background=BG).pack(side="right", pady=(8, 0))
+        title_row.pack(fill="x", padx=18, pady=(14, 4))
+        ttk.Label(title_row, text="Photonic Lantern Holography",
+                  font=self._font_title).pack(side="left")
+        ttk.Label(title_row, text="UCF CREOL  ·  python main.py",
+                  font=self._font_small, foreground=MUTED).pack(side="right")
 
-        ttk.Label(self.root,
-                  text="DIGITAL HOLOGRAPHY · MODE DECOMPOSITION · LP BASIS",
-                  font=self._font_caps_small,
-                  foreground=INK_FAINT, background=BG).pack(
-                      anchor="w", padx=24, pady=(0, 12))
-
-        ttk.Separator(self.root, orient="horizontal").pack(fill="x", padx=24, pady=(0, 10))
+        ttk.Separator(self.root, orient="horizontal").pack(fill="x", padx=18, pady=(2, 8))
 
         self._build_hw_bar()
 
@@ -381,25 +230,21 @@ class HolographyApp:
 
     def _build_hw_bar(self):
         bar = ttk.Frame(self.root)
-        bar.pack(fill="x", padx=24, pady=(0, 14))
+        bar.pack(fill="x", padx=18, pady=(0, 10))
 
-        ttk.Label(bar, text="HARDWARE", style="Caps.TLabel").pack(
-            side="left", padx=(0, 22))
+        ttk.Label(bar, text="Hardware", font=self._font_section).pack(side="left", padx=(0, 18))
 
-        self._hw_dots: dict          = {}
+        self._hw_dots: dict        = {}
         self._hw_status_labels: dict = {}
 
         for name in ("Laser", "Camera", "Switch", "Motors"):
             cell = ttk.Frame(bar)
-            cell.pack(side="left", padx=12)
-            dot = ttk.Label(cell, text="●", foreground=INK_FAINT,
-                            font=(self._font_body[0], 12), background=BG)
+            cell.pack(side="left", padx=10)
+            dot = ttk.Label(cell, text="●", foreground=MUTED, font=(self._font_body[0], 12))
             dot.pack(side="left")
-            ttk.Label(cell, text=f"  {name}",
-                      font=self._font_body_bold).pack(side="left")
-            status = ttk.Label(cell, text="  offline",
-                               foreground=INK_FAINT, font=self._font_caps_small)
-            status.pack(side="left", padx=(6, 0))
+            ttk.Label(cell, text=f"  {name}", font=self._font_body_bold).pack(side="left")
+            status = ttk.Label(cell, text="  Offline", foreground=MUTED, font=self._font_small)
+            status.pack(side="left")
             self._hw_dots[name.lower()]          = dot
             self._hw_status_labels[name.lower()] = status
 
@@ -408,7 +253,7 @@ class HolographyApp:
         self._connect_btn = ttk.Button(btn_row, text="Connect All",
                                        style="Accent.TButton",
                                        command=self._connect_hardware)
-        self._connect_btn.pack(side="left", padx=(0, 8))
+        self._connect_btn.pack(side="left", padx=(0, 6))
         self._disconnect_btn = ttk.Button(btn_row, text="Disconnect",
                                           command=self._disconnect_hardware,
                                           state="disabled")
@@ -941,7 +786,7 @@ class HolographyApp:
         self.notebook.add(tab, text="Configuration")
 
         # Scrollable container — Canvas + inner Frame
-        outer = tk.Canvas(tab, highlightthickness=0, background=BG)
+        outer = tk.Canvas(tab, highlightthickness=0, background="#1c1c1c")
         vsb   = ttk.Scrollbar(tab, orient="vertical", command=outer.yview)
         outer.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
@@ -1140,12 +985,11 @@ class HolographyApp:
     def _set_hw_dot(self, device: str, status: str):
         dot = self._hw_dots.get(device)
         if dot:
-            dot.configure(foreground=HW_STATUS_COLOR.get(status, INK_FAINT))
+            dot.configure(foreground=HW_STATUS_COLOR.get(status, MUTED))
         label = self._hw_status_labels.get(device)
         if label:
-            text = HW_STATUS_TEXT.get(status, "—").lower().replace("…", "…")
-            label.configure(text=f"  {text}",
-                            foreground=HW_STATUS_COLOR.get(status, INK_FAINT))
+            label.configure(text=f"  {HW_STATUS_TEXT.get(status, '—')}",
+                            foreground=HW_STATUS_COLOR.get(status, MUTED))
 
     # ── Progress updates ──────────────────────────────────────────────────────
 
