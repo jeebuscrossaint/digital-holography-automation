@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TitleBar } from "./components/TitleBar";
+import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { OpticalPath } from "./components/OpticalPath";
 import { LogPanel, LogEntry } from "./components/LogPanel";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/Tabs";
 import { LaserTab } from "./components/tabs/LaserTab";
 import { SwitchTab } from "./components/tabs/SwitchTab";
 import { PolarizationTab } from "./components/tabs/PolarizationTab";
@@ -39,38 +39,27 @@ export default function App() {
     []
   );
 
-  // Reveal the hidden Tauri window once React has painted at least once
   const shown = useRef(false);
   useEffect(() => {
     if (shown.current) return;
     shown.current = true;
     (async () => {
-      try {
-        const w = getCurrentWindow();
-        await w.show();
-        await w.setFocus();
-      } catch { /* fine in non-tauri dev */ }
+      try { const w = getCurrentWindow(); await w.show(); await w.setFocus(); }
+      catch { /* fine in browser */ }
     })();
   }, []);
 
-  // Central poll: hardware status + key live values for every device.
-  // Tabs read from these props rather than running their own pollers.
   useEffect(() => {
     let alive = true;
     let tick = 0;
-
     const poll = async () => {
       try {
         const s = await api.status();
         if (!alive) return;
         setStatus(s);
-
-        // Paddle angles — fast, returns from Kinesis cache
         if (s.motors === "online") {
           try { setMotors(await api.motorsGet()); } catch { /* ignore */ }
         }
-
-        // Slow channels — every ~10 ticks (~3 s)
         if (tick % 10 === 0 && s.laser === "online") {
           try { setLaser(await api.laserGet()); } catch { /* ignore */ }
         }
@@ -80,7 +69,6 @@ export default function App() {
       } catch { /* sidecar might still be warming up */ }
       tick++;
     };
-
     poll();
     const id = setInterval(poll, 300);
     return () => { alive = false; clearInterval(id); };
@@ -110,75 +98,50 @@ export default function App() {
     catch (e: any) { onLog(`Disconnect failed: ${e}`, "WARN"); }
   };
 
+  const pageTitle = NAV_ITEMS.find((n) => n.id === tab)?.label ?? "";
+
   return (
-    <div className="h-full flex flex-col bg-bg text-ink font-sans">
+    <div className="h-full flex flex-col text-ink font-sans">
       <TitleBar theme={theme} onToggleTheme={toggle} />
 
-      <div className="px-6 pt-4 pb-1 flex items-baseline gap-3">
-        <h1 className="text-[19px] font-semibold tracking-[-0.015em]">
-          Photonic Lantern Holography
-        </h1>
-        <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint">
-          UCF · CREOL
-        </span>
-      </div>
+      <div className="flex-1 flex min-h-0">
+        <Sidebar active={tab} onSelect={setTab} />
 
-      <OpticalPath
-        active={tab}
-        onSelect={setTab}
-        status={status}
-        laser={laser}
-        switch_={switch_}
-        motors={motors}
-        connecting={connecting}
-        onConnect={connectAll}
-        onDisconnect={disconnectAll}
-      />
+        <main className="flex-1 min-w-0 flex flex-col">
+          {/* page header */}
+          <div className="px-7 pt-5 pb-3">
+            <div className="flex items-baseline gap-3">
+              <h1 className="text-[17px] font-semibold tracking-[-0.02em]">
+                {pageTitle}
+              </h1>
+              <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-faint">
+                UCF · CREOL
+              </span>
+            </div>
+          </div>
 
-      <div className="flex-1 flex min-h-0 border-t border-border">
-        <div className="flex-1 min-w-0 flex flex-col">
-          <Tabs value={tab} onValueChange={setTab} defaultValue="run">
-            <TabsList>
-              <TabsTrigger value="run">Run</TabsTrigger>
-              <TabsTrigger value="laser">Laser</TabsTrigger>
-              <TabsTrigger value="switch">Switch</TabsTrigger>
-              <TabsTrigger value="polarization">Polarization</TabsTrigger>
-              <TabsTrigger value="config">Configuration</TabsTrigger>
-              <TabsTrigger value="results">Results</TabsTrigger>
-            </TabsList>
-            <TabsContent value="run">
-              <RunTab online={status.camera === "online"} onLog={onLog} />
-            </TabsContent>
-            <TabsContent value="laser">
-              <LaserTab
-                online={status.laser === "online"}
-                state={laser}
-                onLog={onLog}
-              />
-            </TabsContent>
-            <TabsContent value="switch">
-              <SwitchTab
-                online={status.switch === "online"}
-                state={switch_}
-                onLog={onLog}
-              />
-            </TabsContent>
-            <TabsContent value="polarization">
-              <PolarizationTab
-                online={status.motors === "online"}
-                cameraOnline={status.camera === "online"}
-                state={motors}
-                onLog={onLog}
-              />
-            </TabsContent>
-            <TabsContent value="config">
-              <ConfigTab onLog={onLog} />
-            </TabsContent>
-            <TabsContent value="results">
-              <ResultsTab />
-            </TabsContent>
-          </Tabs>
-        </div>
+          <OpticalPath
+            active={tab}
+            onSelect={setTab}
+            status={status}
+            laser={laser}
+            switch_={switch_}
+            motors={motors}
+            connecting={connecting}
+            onConnect={connectAll}
+            onDisconnect={disconnectAll}
+          />
+
+          <div className="flex-1 min-h-0 overflow-auto border-t border-border/60">
+            {tab === "run"          && <RunTab          online={status.camera === "online"} onLog={onLog} />}
+            {tab === "laser"        && <LaserTab        online={status.laser  === "online"} state={laser}  onLog={onLog} />}
+            {tab === "switch"       && <SwitchTab       online={status.switch === "online"} state={switch_} onLog={onLog} />}
+            {tab === "polarization" && <PolarizationTab online={status.motors === "online"} cameraOnline={status.camera === "online"} state={motors} onLog={onLog} />}
+            {tab === "config"       && <ConfigTab       onLog={onLog} />}
+            {tab === "results"      && <ResultsTab />}
+          </div>
+        </main>
+
         <LogPanel entries={log} onClear={() => setLog([])} />
       </div>
     </div>

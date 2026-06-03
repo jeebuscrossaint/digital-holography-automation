@@ -31,25 +31,32 @@ export function LogPanel({
   }, [entries]);
 
   return (
-    <div className="flex flex-col h-full bg-panel border-l border-border w-[380px]">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+    <aside
+      className="flex flex-col h-full border-l border-border/60 w-[320px] shrink-0"
+      style={{ background: "hsl(var(--panel) / 0.4)" }}
+    >
+      <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
         <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-faint">
           Activity
         </span>
-        <Button variant="ghost" size="sm" onClick={onClear}>
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
+        <button
+          onClick={onClear}
+          className="text-faint hover:text-ink p-1 rounded"
+          title="Clear log"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
       </div>
       <div
         ref={ref}
-        className="flex-1 overflow-auto px-4 py-3 font-mono text-[12px] leading-relaxed"
+        className="flex-1 overflow-auto px-4 pb-3 font-mono text-[11.5px] leading-[1.55]"
       >
         {entries.length === 0 ? (
           <div className="text-faint italic">no events yet</div>
         ) : (
           entries.map((e, i) => (
             <div key={i} className="flex gap-2">
-              <span className="text-faint">[{e.ts}]</span>
+              <span className="text-faint">{e.ts}</span>
               <span className={cn("whitespace-pre-wrap break-words", LEVEL_CLASS[e.level])}>
                 {e.text}
               </span>
@@ -57,6 +64,6 @@ export function LogPanel({
           ))
         )}
       </div>
-    </div>
+    </aside>
   );
 }

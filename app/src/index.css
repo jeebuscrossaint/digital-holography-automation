@@ -47,16 +47,25 @@ body {
   font-feature-settings: "cv11", "ss01", "ss03";
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  font-size: 13px;          /* macOS body size */
+  letter-spacing: -0.005em;
   background: transparent;
   color: hsl(var(--ink));
 }
-/* Mica / vibrancy fallback — translucent when supported (Win11 / macOS),
-   solid otherwise. Slight transparency lets the system backdrop bleed
-   through without hurting readability. */
+/* Native-app window:
+   - rounded corners (10px is what macOS uses)
+   - subtle 1px inner stroke for definition over Mica/vibrancy
+   - the actual window backdrop bleeds through at ~85% panel opacity */
 #root {
-  background: hsl(var(--bg) / 0.85);
-  backdrop-filter: saturate(120%);
+  background: hsl(var(--bg) / 0.86);
+  backdrop-filter: saturate(135%);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 0.5px hsl(var(--border)) inset,
+    0 1px 0 hsl(var(--ink) / 0.04) inset;
 }
 
 

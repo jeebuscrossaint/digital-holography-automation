@@ -35,26 +35,26 @@ export function OpticalPath({
   );
 
   return (
-    <div className="px-6 pt-2 pb-4">
+    <div className="px-7 pt-1 pb-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-faint">
           Instrument chain
         </span>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           <Button
             variant="primary" size="sm"
             onClick={onConnect}
             disabled={connecting || anyOnline}
           >
-            <Plug className="h-3.5 w-3.5" />
-            Connect all
+            <Plug className="h-3 w-3" />
+            Connect
           </Button>
           <Button
             variant="outline" size="sm"
             onClick={onDisconnect}
             disabled={!anyOnline}
           >
-            <PowerOff className="h-3.5 w-3.5" />
+            <PowerOff className="h-3 w-3" />
             Disconnect
           </Button>
         </div>
