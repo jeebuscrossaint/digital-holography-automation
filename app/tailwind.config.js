@@ -5,8 +5,25 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Inter"', '"Segoe UI Variable Text"', '"Segoe UI"', "system-ui", "sans-serif"],
-        mono: ['"JetBrains Mono"', '"Cascadia Mono"', '"Consolas"', "monospace"],
+        sans: [
+          "ui-sans-serif",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          '"SF Pro Text"',
+          '"Segoe UI Variable Text"',
+          '"Segoe UI"',
+          "Inter",
+          "system-ui",
+          "sans-serif",
+        ],
+        mono: [
+          "ui-monospace",
+          '"SF Mono"',
+          '"JetBrains Mono"',
+          '"Cascadia Mono"',
+          '"Consolas"',
+          "monospace",
+        ],
       },
       colors: {
         // semantic surfaces (driven by CSS vars in index.css so dark mode just flips)

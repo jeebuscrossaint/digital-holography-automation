@@ -128,6 +128,29 @@ fn sidecar_rpc(method: String, params: Value) -> Result<Value, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            use tauri::Manager;
+            // Best-effort native backdrop. Win11 → Mica (with dark fallback);
+            // macOS → window vibrancy; older Win10 → silently no-op.
+            if let Some(win) = app.get_webview_window("main") {
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = window_vibrancy::apply_mica(&win, Some(true))
+                        .or_else(|_| window_vibrancy::apply_acrylic(&win, None));
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window_vibrancy::apply_vibrancy(
+                        &win,
+                        window_vibrancy::NSVisualEffectMaterial::HudWindow,
+                        None,
+                        Some(8.0),
+                    );
+                }
+                let _ = win;
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![sidecar_rpc])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

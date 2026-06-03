@@ -48,9 +48,17 @@ body {
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  background: hsl(var(--bg));
+  background: transparent;
   color: hsl(var(--ink));
 }
+/* Mica / vibrancy fallback — translucent when supported (Win11 / macOS),
+   solid otherwise. Slight transparency lets the system backdrop bleed
+   through without hurting readability. */
+#root {
+  background: hsl(var(--bg) / 0.85);
+  backdrop-filter: saturate(120%);
+}
+
 
 /* Slim, subtle scrollbars */
 *::-webkit-scrollbar           { width: 10px; height: 10px; }
@@ -61,6 +69,10 @@ body {
 /* Tauri drag region helpers */
 [data-tauri-drag-region] { -webkit-app-region: drag; }
 [data-tauri-no-drag]     { -webkit-app-region: no-drag; }
+
+/* macOS traffic-light behaviour — glyphs only visible while the
+   pointer is anywhere over the three-button group. */
+.group:hover .traffic-glyph { opacity: 1 !important; }
 
 /* Hairline divider helper that respects DPR */
 .hairline { box-shadow: 0 1px 0 hsl(var(--border)); }

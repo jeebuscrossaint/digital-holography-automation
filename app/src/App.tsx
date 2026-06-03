@@ -114,11 +114,11 @@ export default function App() {
     <div className="h-full flex flex-col bg-bg text-ink font-sans">
       <TitleBar theme={theme} onToggleTheme={toggle} />
 
-      <div className="px-6 pt-5 pb-1 flex items-baseline gap-3">
-        <h1 className="text-xl font-semibold tracking-tight">
+      <div className="px-6 pt-4 pb-1 flex items-baseline gap-3">
+        <h1 className="text-[19px] font-semibold tracking-[-0.015em]">
           Photonic Lantern Holography
         </h1>
-        <span className="text-xs font-mono uppercase tracking-wider text-faint">
+        <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-faint">
           UCF · CREOL
         </span>
       </div>
