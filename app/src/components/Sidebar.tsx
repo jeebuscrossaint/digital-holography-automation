@@ -54,7 +54,15 @@ export function Sidebar({
       </nav>
 
       <div className="mt-auto px-4 py-2.5 border-t border-border/70">
-        <div className="text-[11px] text-faint">v0.1.0</div>
+        <a
+          href={`https://github.com/jeebuscrossaint/digital-holography-automation/commit/${__GIT_COMMIT__.replace("-dirty", "")}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[11px] text-faint font-mono hover:text-soft"
+          title="Open this build's commit on GitHub"
+        >
+          {__GIT_COMMIT__}
+        </a>
       </div>
     </aside>
   );
