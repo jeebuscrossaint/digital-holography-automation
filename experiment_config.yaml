@@ -4,7 +4,7 @@ hardware:
     power_uw: 208
     power_unit: UW
   camera:
-    url: cam://0
+    url: cam://0?fg=none
     calibration_file: ./hardware/calibration/XC-(10-06-2021)-500us_14931.xca
     exposure_time: 500
     model: Bobcat 320 GigE
