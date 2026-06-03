@@ -127,11 +127,15 @@ fn sidecar_rpc(method: String, params: Value) -> Result<Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+    use tauri::{Emitter, Manager};
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            use tauri::Manager;
-            // Best-effort native backdrop. Win11 → Mica (with dark fallback);
-            // macOS → window vibrancy; older Win10 → silently no-op.
+            // ── Native backdrop ──────────────────────────────────────
             if let Some(win) = app.get_webview_window("main") {
                 #[cfg(target_os = "windows")]
                 {
@@ -149,6 +153,67 @@ pub fn run() {
                 }
                 let _ = win;
             }
+
+            // ── Menu bar (visible on macOS; on Windows the bar is
+            //     hidden by the custom chrome but accelerators still fire) ─
+            let about = PredefinedMenuItem::about(app.handle(), None, None)?;
+            let quit  = PredefinedMenuItem::quit(app.handle(), None)?;
+            let mini  = PredefinedMenuItem::minimize(app.handle(), None)?;
+            let zoom  = PredefinedMenuItem::maximize(app.handle(), None)?;
+
+            let prefs = MenuItemBuilder::with_id("menu_prefs", "Preferences…")
+                .accelerator("CmdOrCtrl+,").build(app)?;
+            let open_data = MenuItemBuilder::with_id("menu_open_data", "Open Data Folder…")
+                .accelerator("CmdOrCtrl+O").build(app)?;
+            let connect = MenuItemBuilder::with_id("menu_connect", "Connect Hardware")
+                .accelerator("CmdOrCtrl+K").build(app)?;
+            let disconnect = MenuItemBuilder::with_id("menu_disconnect", "Disconnect Hardware")
+                .accelerator("CmdOrCtrl+Shift+K").build(app)?;
+            let theme = MenuItemBuilder::with_id("menu_theme", "Toggle Theme")
+                .accelerator("CmdOrCtrl+T").build(app)?;
+            let start = MenuItemBuilder::with_id("menu_exp_start", "Start Experiment")
+                .accelerator("CmdOrCtrl+R").build(app)?;
+            let stop = MenuItemBuilder::with_id("menu_exp_stop", "Stop Experiment")
+                .accelerator("CmdOrCtrl+.").build(app)?;
+
+            // Tab nav (Cmd/Ctrl+1..6)
+            let tab_items: Vec<_> = [
+                ("menu_tab_run",          "Run Experiment", "CmdOrCtrl+1"),
+                ("menu_tab_laser",        "Laser",          "CmdOrCtrl+2"),
+                ("menu_tab_switch",       "Switch",         "CmdOrCtrl+3"),
+                ("menu_tab_polarization", "Polarization",   "CmdOrCtrl+4"),
+                ("menu_tab_config",       "Configuration",  "CmdOrCtrl+5"),
+                ("menu_tab_results",      "Results",        "CmdOrCtrl+6"),
+            ].iter().map(|(id, label, accel)| {
+                MenuItemBuilder::with_id(*id, *label).accelerator(*accel).build(app).unwrap()
+            }).collect();
+
+            let app_menu = SubmenuBuilder::new(app, "Digital Holography")
+                .item(&about).separator()
+                .item(&prefs).separator()
+                .item(&quit).build()?;
+            let file_menu = SubmenuBuilder::new(app, "File")
+                .item(&open_data).separator()
+                .item(&connect).item(&disconnect).build()?;
+            let exp_menu = SubmenuBuilder::new(app, "Experiment")
+                .item(&start).item(&stop).build()?;
+            let mut view_builder = SubmenuBuilder::new(app, "View");
+            for it in &tab_items { view_builder = view_builder.item(it); }
+            let view_menu = view_builder.separator().item(&theme).build()?;
+            let win_menu = SubmenuBuilder::new(app, "Window")
+                .item(&mini).item(&zoom).build()?;
+
+            let menu = MenuBuilder::new(app)
+                .item(&app_menu).item(&file_menu).item(&exp_menu)
+                .item(&view_menu).item(&win_menu).build()?;
+            app.set_menu(menu)?;
+
+            // Route menu clicks to the frontend as a Tauri event
+            app.on_menu_event(|app, event| {
+                let id = event.id().as_ref();
+                let _ = app.emit("menu", id);
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![sidecar_rpc])

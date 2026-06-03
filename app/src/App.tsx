@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import { useShortcuts } from "./lib/shortcuts";
 import { TitleBar } from "./components/TitleBar";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { OpticalPath } from "./components/OpticalPath";
@@ -12,7 +15,7 @@ import { ConfigTab } from "./components/tabs/ConfigTab";
 import { ResultsTab } from "./components/tabs/ResultsTab";
 import { useTheme } from "./lib/theme";
 import {
-  api, HardwareStatus, LaserState, SwitchState, MotorState,
+  api, rpc, HardwareStatus, LaserState, SwitchState, MotorState,
 } from "./lib/api";
 
 export default function App() {
@@ -97,6 +100,71 @@ export default function App() {
     try { await api.disconnectAll(); }
     catch (e: any) { onLog(`Disconnect failed: ${e}`, "WARN"); }
   };
+
+  const startExp = useCallback(async () => {
+    try { await api.experimentStart("full"); onLog("Experiment started", "INFO"); }
+    catch (e: any) { onLog(`Start failed: ${e}`, "WARN"); }
+  }, [onLog]);
+
+  const stopExp = useCallback(async () => {
+    try { await api.experimentStop(); onLog("Stop requested", "INFO"); }
+    catch (e: any) { onLog(`Stop failed: ${e}`, "WARN"); }
+  }, [onLog]);
+
+  // Keyboard shortcuts (fallback / works even without visible menu bar)
+  useShortcuts({
+    onTab: setTab,
+    onTheme: toggle,
+    onConnect: connectAll,
+    onDisconnect: disconnectAll,
+    onStart: startExp,
+    onStop: stopExp,
+  });
+
+  // Native menu → emits 'menu' events from the Rust side
+  useEffect(() => {
+    const u = listen<string>("menu", (e) => {
+      const id = e.payload;
+      if (id.startsWith("menu_tab_")) setTab(id.slice("menu_tab_".length));
+      else if (id === "menu_theme")      toggle();
+      else if (id === "menu_connect")    connectAll();
+      else if (id === "menu_disconnect") disconnectAll();
+      else if (id === "menu_exp_start")  startExp();
+      else if (id === "menu_exp_stop")   stopExp();
+      else if (id === "menu_open_data") rpc("results_open_folder").catch(() => {});
+    });
+    return () => { u.then((fn) => fn()).catch(() => {}); };
+  }, [toggle, startExp, stopExp]);
+
+  // Experiment-complete native notification
+  const lastRunning = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await api.experimentState();
+        if (!alive) return;
+        if (lastRunning.current && !s.running) {
+          // running → not-running transition
+          try {
+            let allowed = await isPermissionGranted();
+            if (!allowed) allowed = (await requestPermission()) === "granted";
+            if (allowed) {
+              sendNotification({
+                title: "Digital Holography",
+                body: s.status?.toLowerCase().includes("error")
+                  ? `Experiment ended with error: ${s.status}`
+                  : `Experiment complete · ${s.acq} images captured`,
+              });
+            }
+          } catch { /* ignore */ }
+        }
+        lastRunning.current = s.running;
+      } catch { /* ignore */ }
+    };
+    const id = setInterval(tick, 1000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   const pageTitle = NAV_ITEMS.find((n) => n.id === tab)?.label ?? "";
 
