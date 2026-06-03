@@ -149,7 +149,9 @@ class HolographyApp:
         self._build_ui()
         self._poll_queue()
         self._stop_background = threading.Event()
-        threading.Thread(target=self._background_poller, daemon=True).start()
+        threading.Thread(target=self._background_poller,  daemon=True).start()
+        threading.Thread(target=self._camera_preview_loop, daemon=True).start()
+        self._cam_first_frame_logged = False
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Config ────────────────────────────────────────────────────────────────
@@ -637,6 +639,46 @@ class HolographyApp:
             tick += 1
             self._stop_background.wait(0.3)
 
+    def _camera_preview_loop(self):
+        """Continuous live preview — grab a frame ~10× per second whenever
+        the camera is connected. Xeneth has its own preview window that
+        works the same way; without this our canvas would only ever show
+        the single frame captured at connect time (which is usually empty
+        because the sensor's still ramping up)."""
+        import numpy as np
+        while not self._stop_background.is_set():
+            cam = self.camera
+            if cam is not None and not self.experiment_running:
+                try:
+                    frame = cam.getFrame()
+                    if frame is not None:
+                        if not self._cam_first_frame_logged:
+                            arr = np.asarray(frame)
+                            self.msg_queue.put({
+                                "type": "log",
+                                "text": (f"Camera frame: shape={arr.shape}, "
+                                         f"dtype={arr.dtype}, "
+                                         f"min={int(arr.min())}, max={int(arr.max())}, "
+                                         f"mean={float(arr.mean()):.1f}"),
+                                "level": "DEBUG",
+                            })
+                            self._cam_first_frame_logged = True
+                        self.msg_queue.put({"type": "frame", "data": frame})
+                except Exception as e:
+                    if not self._cam_first_frame_logged:
+                        self.msg_queue.put({
+                            "type": "log",
+                            "text": f"Camera getFrame failed: {e}",
+                            "level": "WARN",
+                        })
+                        self._cam_first_frame_logged = True
+            else:
+                # Reset the one-shot log when camera disconnects so reconnects
+                # also get a diagnostic line
+                if cam is None:
+                    self._cam_first_frame_logged = False
+            self._stop_background.wait(0.1)
+
     def _sync_paddle_targets_from_hw(self):
         """Set slider targets to whatever the motors currently report."""
         if not self.motors or not hasattr(self, "_paddle_target_vars"):
@@ -1016,11 +1058,22 @@ class HolographyApp:
             from PIL import Image, ImageTk
             import numpy as np
 
-            arr = np.asarray(data, dtype=float)
-            mn, mx = arr.min(), arr.max()
-            if mx > mn:
-                arr = (arr - mn) / (mx - mn) * 255
-            arr = arr.astype(np.uint8)
+            arr = np.asarray(data)
+            # Normalize to 0–255 uint8 for display. Stretch using mean ±
+            # 3·std rather than absolute min/max — Bobcat 320 frames are
+            # 14-bit; raw min/max stretch makes a uniform sensor noise
+            # field look like vague clouds and a real signal look flat.
+            if arr.size == 0:
+                return
+            f = arr.astype(np.float32)
+            mu, sd = float(f.mean()), float(f.std())
+            if sd < 1e-6:
+                # Truly flat frame — show as mid-gray so it's obvious vs.
+                # a stretched bright frame
+                arr = np.full(f.shape, 128, dtype=np.uint8)
+            else:
+                lo, hi = mu - 3 * sd, mu + 3 * sd
+                arr = np.clip((f - lo) / max(hi - lo, 1e-6) * 255, 0, 255).astype(np.uint8)
 
             cw = max(self._canvas.winfo_width(),  10)
             ch = max(self._canvas.winfo_height(), 10)
