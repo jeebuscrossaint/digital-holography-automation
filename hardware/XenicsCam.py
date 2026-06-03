@@ -1,9 +1,11 @@
 #This works specifically an exclusively for the Orange Bobcat#
 import sys
 from datetime import datetime
+import time
 from xenics.xeneth import *
 from xenics.xeneth.errors import XenethAPIException, XenethException
 from xenics.xeneth.xcamera import XCamera
+from xenics.xeneth.capi.enums import XLoadCalibrationFlags
 
 """
 Discovers available cameras and prompts for selection if necessary
@@ -72,18 +74,35 @@ class xCam:
                 # Output the product id and serial and exposure time
                 print(f"Controlling camera with PID: 0x{int(self.pid):X}, SER: {self.ser}, ExposureTime: {self.exposure_time}")
             
-            # Try to load calibration, but don't fail if missing
-            try:
-                import os as _os
-                _cal = _os.path.join(_os.path.dirname(__file__), 'calibration', 'XC-(10-06-2021)-500us_14931.xca')
-                self.cam.load_calibration(_cal, 2)
-            except Exception as e:
-                print(f"Calibration file not found (this is OK, will use default): {e}")
-            
+            # Calibration is OPTIONAL. The previous code passed flag=2
+            # which is XLC_RFU_1 (reserved / undefined) — likely the
+            # reason every frame came back as zeros. Skip calibration
+            # by default; enable via env var XENETH_LOAD_CAL=1 with the
+            # CORRECT flag (XLC_StartSoftwareCorrection = 1).
+            import os as _os
+            if _os.environ.get("XENETH_LOAD_CAL") == "1":
+                try:
+                    _cal = _os.path.join(_os.path.dirname(__file__),
+                                         'calibration',
+                                         'XC-(10-06-2021)-500us_14931.xca')
+                    self.cam.load_calibration(
+                        _cal, XLoadCalibrationFlags.XLC_StartSoftwareCorrection)
+                    print(f"Calibration loaded: {_cal}")
+                except Exception as e:
+                    print(f"Calibration not loaded (continuing without): {e}")
+
             self.buffer = self.cam.create_buffer()
             if self.cam.is_initialized:
                 print("Start capturing")
                 self.cam.start_capture()
+                # Discard the first few frames — the sensor & DMA pipeline
+                # need a moment to flush after StartCapture
+                time.sleep(0.2)
+                for _ in range(3):
+                    try:
+                        self.cam.get_frame(self.buffer, flags=XGetFrameFlags.XGF_Blocking)
+                    except Exception:
+                        break
             else:
                 print("Initialization failed")
 
