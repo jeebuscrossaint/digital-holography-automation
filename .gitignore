@@ -11,6 +11,10 @@ app/src-tauri/target/
 app/src-tauri/gen/
 app/src-tauri/Cargo.lock
 
+# PyInstaller artifacts (rebuilt from sources)
+build/
+app/src-tauri/binaries/
+
 # C extensions
 *.so
 

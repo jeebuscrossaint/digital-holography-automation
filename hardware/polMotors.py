@@ -16,8 +16,20 @@ real position; with mask=0x04 it returns garbage zero.
 import ctypes
 import os
 import time
+from pathlib import Path
 
-_DLL_PATH = r"C:\Program Files\Thorlabs\Kinesis\Thorlabs.MotionControl.Polarizer.dll"
+
+def _resolve_dll() -> str:
+    """Prefer the vendored Thorlabs DLLs (so lab members don't have to
+    install Kinesis), fall back to the system install path."""
+    here = Path(__file__).resolve().parent.parent
+    vendored = here / "vendor" / "thorlabs" / "Thorlabs.MotionControl.Polarizer.dll"
+    if vendored.exists():
+        return str(vendored)
+    return r"C:\Program Files\Thorlabs\Kinesis\Thorlabs.MotionControl.Polarizer.dll"
+
+
+_DLL_PATH = _resolve_dll()
 
 # Per-paddle SDK identifier (NOT a bitmask)
 _PADDLE_ID   = {1: 1, 2: 2, 3: 3}

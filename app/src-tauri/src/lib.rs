@@ -35,15 +35,15 @@ struct Sidecar {
 
 impl Sidecar {
     fn spawn() -> Result<Self> {
-        let (exe, script) = python_command()?;
-        eprintln!("[sidecar] spawning {:?} {:?}", exe, script);
+        let (exe, args) = python_command()?;
+        eprintln!("[sidecar] spawning {:?} {:?}", exe, args);
         let mut child = Command::new(&exe)
-            .arg(&script)
+            .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .with_context(|| format!("spawning Python sidecar: {:?} {:?}", exe, script))?;
+            .with_context(|| format!("spawning sidecar: {:?} {:?}", exe, args))?;
         let stdin  = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
         let stdout = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?);
         Ok(Self { _child: child, stdin, stdout, next_id: AtomicU64::new(1) })
@@ -88,13 +88,21 @@ fn sidecar() -> Result<Arc<Mutex<Sidecar>>> {
         .cloned()
 }
 
-/// Locate the Python interpreter and sidecar/main.py.
+/// Locate the sidecar process to spawn.
 ///
-/// Search order:
-///   1. HOLOGRAPHY_PYTHON  env var (full path to python.exe)
-///   2. <repo>/.venv/Scripts/python.exe
-///   3. "python" on PATH
-fn python_command() -> Result<(PathBuf, PathBuf)> {
+/// Preferred path: a single-file PyInstaller-built executable shipped
+/// next to the app (Tauri "sidecar" pattern). Fallback for development:
+/// run sidecar/main.py with the project's Python interpreter.
+///
+/// Returns (program, args_to_pass_before_user_input).
+fn python_command() -> Result<(PathBuf, Vec<PathBuf>)> {
+    // 1) Look for the bundled PyInstaller exe (production)
+    if let Some(bundled) = bundled_sidecar_path() {
+        if bundled.exists() {
+            return Ok((bundled, vec![]));
+        }
+    }
+    // 2) Dev fallback: run the .py source with a discoverable python
     let exe = std::env::var_os("HOLOGRAPHY_PYTHON")
         .map(PathBuf::from)
         .or_else(|| {
@@ -106,7 +114,20 @@ fn python_command() -> Result<(PathBuf, PathBuf)> {
     if !script.exists() {
         return Err(anyhow!("sidecar script missing at {:?}", script));
     }
-    Ok((exe, script))
+    Ok((exe, vec![script]))
+}
+
+/// Where the PyInstaller-built sidecar lives. Tauri bundles sidecar
+/// binaries into the same directory as the main exe at install time.
+fn bundled_sidecar_path() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let candidates = [
+        exe_dir.join(format!("holography-sidecar{}", suffix)),
+        // Tauri 2 also strips the triple in some packaging modes
+        exe_dir.join(format!("binaries/holography-sidecar{}", suffix)),
+    ];
+    candidates.into_iter().find(|p| p.exists())
 }
 
 /// `<src-tauri>/../..` — i.e. the repo root where `sidecar/` and `hardware/` live.
