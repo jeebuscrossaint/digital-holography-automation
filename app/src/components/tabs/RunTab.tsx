@@ -3,7 +3,6 @@ import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Play, Square, Camera, AlertTriangle, Maximize2, X, ZoomIn, ZoomOut, FolderOpen } from "lucide-react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, ExperimentState } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -43,20 +42,15 @@ export function RunTab({
     return () => { alive = false; };
   }, []);
 
-  const chooseFolder = async () => {
+  const saveFolder = async () => {
     try {
-      const picked = await openDialog({ directory: true, multiple: false,
-                                        defaultPath: outputDir || undefined,
-                                        title: "Choose where to save holograms" });
-      if (!picked || Array.isArray(picked)) return;
       const cfg = await api.configGet();
       cfg.data = cfg.data ?? {};
-      cfg.data.output_dir = picked;
+      cfg.data.output_dir = outputDir;
       await api.configSet(cfg);
-      setOutputDir(picked);
-      onLog(`Saving data to: ${picked}`, "OK");
+      onLog(`Saving data to: ${outputDir}`, "OK");
     } catch (e: any) {
-      onLog(`Folder pick failed: ${e}`, "WARN");
+      onLog(`Save folder failed: ${e}`, "WARN");
     }
   };
 
@@ -177,12 +171,16 @@ export function RunTab({
             <span className="text-xs text-faint font-mono uppercase tracking-wider whitespace-nowrap">
               Save to
             </span>
-            <span className="flex-1 min-w-0 truncate text-sm text-soft font-mono"
-                  title={outputDir}>
-              {outputDir || "—"}
-            </span>
-            <Button variant="outline" disabled={state.running} onClick={chooseFolder}>
-              <FolderOpen className="h-4 w-4" /> Choose…
+            <Input
+              className="flex-1 min-w-0 font-mono text-sm"
+              value={outputDir}
+              onChange={(e) => setOutputDir(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveFolder()}
+              disabled={state.running}
+              placeholder="./holography_data"
+            />
+            <Button variant="outline" disabled={state.running} onClick={saveFolder}>
+              <FolderOpen className="h-4 w-4" /> Save
             </Button>
           </div>
         </CardBody>
@@ -246,7 +244,7 @@ export function RunTab({
           </div>
           <div
             className={cn(
-              "w-full h-[58vh] min-h-[320px] bg-[#0a0a0a] rounded border grid place-items-center overflow-hidden",
+              "w-full h-[44vh] min-h-[280px] bg-[#0a0a0a] rounded border grid place-items-center overflow-hidden",
               saturated ? "border-warn" : "border-border",
               frameSrc && "cursor-zoom-in"
             )}

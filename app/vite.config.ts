@@ -57,6 +57,13 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: "127.0.0.1",
+    // During frontend dev, forward API calls to the FastAPI backend (run it
+    // with: uv run uvicorn server.main:app --port 8000). In production the
+    // backend serves the built UI itself, so no proxy is needed.
+    proxy: {
+      "/rpc":     "http://127.0.0.1:8000",
+      "/healthz": "http://127.0.0.1:8000",
+    },
     // Stop the Vite file watcher from following Cargo's output directory.
     // Without this it EBUSY-crashes whenever cargo overwrites the DLL.
     watch: {

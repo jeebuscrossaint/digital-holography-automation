@@ -87,10 +87,42 @@ cd digital-holography-automation
 .\start.bat        # = uv run python main.py
 ```
 
-Hit **Connect All**, then **Start Experiment**. The Tauri app below is a
-work-in-progress rewrite and is not yet wired up — prefer `start.bat`.
+Hit **Connect All**, then **Start Experiment**.
+
+### The web app — recommended for the headless NUC (remote over Tailscale)
+
+The control UI is also a normal web app: a FastAPI server (`server/main.py`)
+serves both the UI and the hardware API on one port. Run it on the NUC and
+drive the rig from your laptop/phone browser over Tailscale — no desktop
+session needed, and **the experiment keeps running after you close the browser
+or disconnect** (it runs in a background thread on the server).
+
+```sh
+# on the NUC (needs uv + the two SDKs + the firewall rule, same as above):
+.\start-server.bat            # builds the UI once, serves on 0.0.0.0:8000
+```
+
+Then from any device on your tailnet open `http://<nuc-tailscale-name>:8000`.
+(First run builds the UI, which needs Node; after that it's Python-only.)
+
+To auto-start on boot, register `start-server.bat` as a Windows Task Scheduler
+task ("run whether logged on or not") or wrap it with NSSM as a service.
+
+> Security: only expose this over **Tailscale** (a private mesh of *your*
+> devices) — never forward the port to the public internet; it's direct
+> hardware control.
 
 ### From source (development)
+
+For UI development with hot-reload, run the backend and the Vite dev server
+separately (Vite proxies `/rpc` to the backend):
+
+```sh
+uv run uvicorn server.main:app --port 8000     # terminal 1 (API)
+cd app && npm run dev                            # terminal 2 (UI @ :1420)
+```
+
+### Tauri desktop shell (optional)
 
 ```sh
 git clone <repo-url>

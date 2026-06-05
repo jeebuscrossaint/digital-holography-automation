@@ -5,6 +5,7 @@ description = "Photonic Lantern Digital Holography Automation — UCF CREOL"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "fastapi>=0.115.0",
     "gpib-ctypes>=0.3.0",
     "matplotlib>=3.10.8",
     "numpy>=2.4.2",
@@ -15,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "scipy>=1.17.1",
     "sv-ttk>=2.6.0",
+    "uvicorn>=0.34.0",
 ]
 
 [dependency-groups]

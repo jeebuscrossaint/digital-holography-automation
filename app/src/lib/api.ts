@@ -1,8 +1,20 @@
-import { invoke } from "@tauri-apps/api/core";
-
-// Thin wrapper around the Tauri command that pipes JSON-RPC to the Python sidecar.
+// Talk to the Python backend over HTTP, so the UI works in any browser (e.g.
+// over Tailscale to a headless NUC). The FastAPI server exposes POST /rpc with
+// the same {method, params} -> {ok, result} contract the old Tauri bridge used.
 export async function rpc<T = any>(method: string, params: Record<string, any> = {}): Promise<T> {
-  return invoke<T>("sidecar_rpc", { method, params });
+  let data: any;
+  try {
+    const res = await fetch("/rpc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method, params }),
+    });
+    data = await res.json();
+  } catch (e) {
+    throw new Error(`cannot reach server (${method}): ${e}`);
+  }
+  if (!data || !data.ok) throw new Error(data?.error || `rpc ${method} failed`);
+  return data.result as T;
 }
 
 // Convenience methods — mirror the sidecar's handlers

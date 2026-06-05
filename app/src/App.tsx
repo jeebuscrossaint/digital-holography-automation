@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { useShortcuts } from "./lib/shortcuts";
+import { isTauri } from "./lib/platform";
 import { TitleBar } from "./components/TitleBar";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { OpticalPath } from "./components/OpticalPath";
@@ -123,6 +125,7 @@ export default function App() {
 
   // Native menu → emits 'menu' events from the Rust side
   useEffect(() => {
+    if (!isTauri) return;   // native menu only exists in the desktop shell
     const u = listen<string>("menu", (e) => {
       const id = e.payload;
       if (id.startsWith("menu_tab_")) setTab(id.slice("menu_tab_".length));
@@ -146,16 +149,17 @@ export default function App() {
         if (!alive) return;
         if (lastRunning.current && !s.running) {
           // running → not-running transition
+          const body = s.status?.toLowerCase().includes("error")
+            ? `Experiment ended with error: ${s.status}`
+            : `Experiment complete · ${s.acq} images captured`;
           try {
-            let allowed = await isPermissionGranted();
-            if (!allowed) allowed = (await requestPermission()) === "granted";
-            if (allowed) {
-              sendNotification({
-                title: "Digital Holography",
-                body: s.status?.toLowerCase().includes("error")
-                  ? `Experiment ended with error: ${s.status}`
-                  : `Experiment complete · ${s.acq} images captured`,
-              });
+            if (isTauri) {
+              let allowed = await isPermissionGranted();
+              if (!allowed) allowed = (await requestPermission()) === "granted";
+              if (allowed) sendNotification({ title: "Digital Holography", body });
+            } else if ("Notification" in window) {
+              if (Notification.permission === "default") await Notification.requestPermission();
+              if (Notification.permission === "granted") new Notification("Digital Holography", { body });
             }
           } catch { /* ignore */ }
         }
@@ -170,17 +174,28 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col text-ink font-sans">
-      <TitleBar theme={theme} onToggleTheme={toggle} />
+      {/* Custom titlebar only in the desktop shell; the browser has its own. */}
+      {isTauri && <TitleBar theme={theme} onToggleTheme={toggle} />}
 
       <div className="flex-1 flex min-h-0">
         <Sidebar active={tab} onSelect={setTab} />
 
         <main className="flex-1 min-w-0 flex flex-col">
-          {/* page header — macOS "large title" style */}
-          <div className="px-7 pt-5 pb-3">
+          {/* page header — large title + theme toggle (toggle lives here so it
+              exists in the browser, where there's no custom titlebar). */}
+          <div className="px-7 pt-5 pb-3 flex items-center justify-between">
             <h1 className="text-[22px] font-bold tracking-[-0.022em] text-ink">
               {pageTitle}
             </h1>
+            <button
+              type="button"
+              onClick={toggle}
+              title={theme === "dark" ? "Light mode" : "Dark mode"}
+              aria-label="Toggle theme"
+              className="grid place-items-center w-8 h-8 rounded-md text-soft hover:text-ink hover:bg-panel transition-colors"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
           </div>
 
           <OpticalPath
