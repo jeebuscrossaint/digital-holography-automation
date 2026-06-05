@@ -1,27 +1,34 @@
 @echo off
 cd /d "%~dp0"
 
-REM Make sure the Python sidecar finds the project's venv
-where uv >nul 2>nul
-if %errorlevel%==0 (
-    uv sync >nul
-    set "HOLOGRAPHY_PYTHON=%~dp0.venv\Scripts\python.exe"
-)
+REM Point the Python sidecar at the project venv if it exists
+if exist "%~dp0.venv\Scripts\python.exe" set "HOLOGRAPHY_PYTHON=%~dp0.venv\Scripts\python.exe"
 
-REM Resolve npm. Prefer PATH; otherwise call the Scoop nodejs install by full
-REM path (its PATH entry only reaches NEW shells after `scoop reset nodejs`).
-set "RUNNPM=npm"
-where npm >nul 2>nul
-if not %errorlevel%==0 (
-    if exist "%USERPROFILE%\scoop\apps\nodejs\current\npm.cmd" (
-        set "RUNNPM=%USERPROFILE%\scoop\apps\nodejs\current\npm.cmd"
-    ) else (
-        echo.
-        echo ERROR: npm not found. Open a NEW terminal ^(scoop already added node
-        echo        to PATH^), or install Node with: scoop install nodejs
-        exit /b 1
-    )
+REM --- Force node + cargo onto PATH for THIS process and all its children ---
+REM npm/tauri spawn child processes that must find `node` and `cargo`. We avoid
+REM `where` here on purpose: where.exe lives in System32, which isn't reliably
+REM on this PATH, so `where` itself can fail. `if exist` is a cmd builtin and
+REM always works.
+set "NODEDIR=%USERPROFILE%\scoop\apps\nodejs\current"
+if exist "%NODEDIR%\node.exe" set "PATH=%NODEDIR%;%PATH%"
+set "CARGODIR=%USERPROFILE%\scoop\apps\rustup\current\.cargo\bin"
+if exist "%CARGODIR%\cargo.exe" set "PATH=%CARGODIR%;%PATH%"
+REM keep System32 reachable for child tools, in case it isn't already
+set "PATH=%PATH%;%SystemRoot%\System32"
+
+if not exist "%NODEDIR%\node.exe" (
+    echo ERROR: node.exe not found at "%NODEDIR%".
+    echo Install Node ^(scoop install nodejs^) or edit NODEDIR in this script.
+    exit /b 1
 )
 
 cd app
-call "%RUNNPM%" run tauri dev
+
+REM Fresh-install deps if missing (a cloud-synced node_modules has broken shims
+REM / unbuilt native deps). Safe + fast to skip when already present.
+if not exist "node_modules\@tauri-apps\cli\tauri.js" (
+    echo Installing frontend dependencies ^(first run on this machine^)...
+    call npm install --no-audit --no-fund || ( echo npm install failed & exit /b 1 )
+)
+
+call npm run tauri dev
