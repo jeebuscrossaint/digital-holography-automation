@@ -76,16 +76,7 @@ lib/                   LP-mode generation + FFT helpers (MMF, Caleb's funcs)
 tools/                 build scripts (build_app.py) + hardware probes
 experiment_config.yaml instrument addresses + sweep parameters
 docs/                  setup guides (GigE camera, Xeneth SDK)
-app/ server/ sidecar/  optional web / desktop-shell frontends (see below)
 ```
-
-## Frontends
-
-- **Native desktop app (tkinter)** — `main.py`, packaged to one `.exe`. The
-  primary deliverable.
-- **Web app (optional)** — `server/main.py` (FastAPI) serves a React UI so the
-  rig can be driven from any browser over Tailscale to a headless NUC; `app/`
-  also builds a Tauri desktop shell. Same Python hardware backend either way.
 
 ## Status & known limits
 

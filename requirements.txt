@@ -25,7 +25,3 @@ gpib-ctypes>=0.3.0
 
 # tkinter app — Windows 11 Fluent theme
 sv-ttk>=2.6.0
-
-# Optional web frontend (headless NUC over Tailscale) — server/main.py
-fastapi>=0.115.0
-uvicorn>=0.34.0

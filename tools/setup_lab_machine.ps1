@@ -50,21 +50,19 @@ function Ensure-InboundUdpRule {
 
 Write-Host "Adding inbound GigE-stream firewall rules..."
 
-# 1) The venv interpreter — used by the tkinter app (start.bat / main.py)
-#    and by the Tauri dev sidecar (start-tauri.bat).
+# 1) The venv interpreter — used when running from source (start.bat / main.py).
 Ensure-InboundUdpRule "Holography venv python (GigE inbound)" `
     (Join-Path $repo ".venv\Scripts\python.exe")
 
-# 2) The PyInstaller-bundled sidecar, if a release build exists in-repo.
-Get-ChildItem -Path (Join-Path $repo "app\src-tauri\binaries") `
-    -Filter "holography-sidecar-*.exe" -ErrorAction SilentlyContinue |
+# 2) The PyInstaller-packaged app, if a build exists in-repo (dist/).
+Get-ChildItem -Path (Join-Path $repo "dist") `
+    -Filter "Digital Holography*.exe" -ErrorAction SilentlyContinue |
     ForEach-Object {
-        Ensure-InboundUdpRule "Holography sidecar (GigE inbound)" $_.FullName
+        Ensure-InboundUdpRule "Holography app (GigE inbound)" $_.FullName
     }
 
 Write-Host "`nDone. If the camera still shows 'No signal':" -ForegroundColor Cyan
 Write-Host "  - make sure Xeneth is fully CLOSED (only one app can stream),"
 Write-Host "  - confirm the camera shows a live image in Xeneth first,"
-Write-Host "  - for the INSTALLED app, the sidecar lives in Program Files;"
-Write-Host "    re-run this after installing, or allow that exe when Windows"
-Write-Host "    prompts on first launch."
+Write-Host "  - if you run the packaged .exe from a different folder, re-run"
+Write-Host "    this script there, or allow it when Windows prompts on launch."

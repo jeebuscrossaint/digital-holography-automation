@@ -11,8 +11,8 @@ rest is bundled in this repo.
 | Component | How | Action needed |
 |-----------|-----|---------------|
 | **Thorlabs Kinesis** (paddle motors) | DLLs in `vendor/thorlabs/` | none — works out of the box |
-| **Python interpreter** | Bundled into the installer via PyInstaller | none — included in the `.msi` |
-| **All Python deps** (pyvisa, numpy, scipy, Pillow, etc.) | Compiled into the sidecar binary | none |
+| **Python interpreter** | Bundled into the `.exe` via PyInstaller | none — included in the executable |
+| **All Python deps** (pyvisa, numpy, scipy, Pillow, etc.) | Compiled into the `.exe` | none |
 | **App + GUI** | Native `Digital Holography.exe` | none |
 
 ## What still needs separate install (one time per lab machine)
@@ -64,8 +64,8 @@ re-run):
 powershell -ExecutionPolicy Bypass -File tools\setup_lab_machine.ps1
 ```
 
-This adds the inbound rule for the venv Python (tkinter app + Tauri dev)
-and, if a release build is present, for the bundled sidecar `.exe`.
+This adds the inbound rule for the venv Python (running from source) and,
+if a packaged build is present, for `dist/Digital Holography.exe`.
 
 > If the camera *still* shows "No signal": make sure **Xeneth is fully
 > closed** (only one program can hold the single GigE stream channel at a
@@ -103,86 +103,6 @@ cd digital-holography-automation
 ```
 
 Hit **Connect All**, then **Start Experiment**.
-
-### The web app — recommended for the headless NUC (remote over Tailscale)
-
-The control UI is also a normal web app: a FastAPI server (`server/main.py`)
-serves both the UI and the hardware API on one port. Run it on the NUC and
-drive the rig from your laptop/phone browser over Tailscale — no desktop
-session needed, and **the experiment keeps running after you close the browser
-or disconnect** (it runs in a background thread on the server).
-
-```sh
-# on the NUC (needs uv + the two SDKs + the firewall rule, same as above):
-.\start-server.bat            # builds the UI once, serves on 0.0.0.0:8000
-```
-
-Then from any device on your tailnet open `http://<nuc-tailscale-name>:8000`.
-(First run builds the UI, which needs Node; after that it's Python-only.)
-
-To auto-start on boot, register `start-server.bat` as a Windows Task Scheduler
-task ("run whether logged on or not") or wrap it with NSSM as a service.
-
-> Security: only expose this over **Tailscale** (a private mesh of *your*
-> devices) — never forward the port to the public internet; it's direct
-> hardware control.
-
-### From source (development)
-
-For UI development with hot-reload, run the backend and the Vite dev server
-separately (Vite proxies `/rpc` to the backend):
-
-```sh
-uv run uvicorn server.main:app --port 8000     # terminal 1 (API)
-cd app && npm run dev                            # terminal 2 (UI @ :1420)
-```
-
-### Tauri desktop shell (optional)
-
-```sh
-git clone <repo-url>
-cd digital-holography-automation
-# Install uv if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
-.\start-tauri.bat
-```
-
-`start-tauri.bat` runs `uv sync` to set up the Python env, then
-launches `npm run tauri dev`. First run compiles Rust (~1 min).
-
-### From the installer (lab members)
-
-  1. Grab the latest `Digital Holography_*_x64-setup.exe` from the
-     `app/src-tauri/target/release/bundle/nsis/` folder of the build
-     machine (or wherever it's distributed)
-  2. Double-click to install
-  3. Launch from the Start menu
-
-The installer drops:
-  - `Digital Holography.exe` (main app)
-  - `holography-sidecar.exe` (Python brain, bundled)
-  - All Thorlabs Kinesis DLLs
-
-The two SDKs from the section above (Keysight IO Libraries +
-Xenics Xeneth) still need to be installed once on each lab machine.
-
----
-
-## Building a release
-
-On a machine with everything installed:
-
-```sh
-# 1. Bundle the Python sidecar into a single .exe
-uv run python tools/build_sidecar.py
-# → drops app/src-tauri/binaries/holography-sidecar-<triple>.exe
-
-# 2. Build the Tauri app + installers
-cd app
-npm run tauri build
-# → app/src-tauri/target/release/bundle/
-#     nsis/   Digital Holography_<ver>_x64-setup.exe   ← share this
-#     msi/    Digital Holography_<ver>_x64_en-US.msi
-```
 
 ---
 
