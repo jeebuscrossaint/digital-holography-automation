@@ -43,44 +43,43 @@ def _dc_power(power, dc_diameter):
 
 
 def calculate_sideband_energy(image, quadrant=None, line_filter_width=5,
-                              dc_diameter=40, carrier_locked=True, window=4):
-    """Off-axis fringe metric — Caleb's FFT-sideband idea, made robust.
+                              dc_diameter=40, window=4):
+    """Carrier-to-background prominence of the off-axis fringe sideband — the
+    fringe-quality metric the optimizer maximizes.
 
-    FFT the (square-cropped) image and zero the DC cross + center disk
-    (reusing Caleb's own DC filter, so 'good fringes' means the same thing as
-    in data_processing.findCentroid). The interference carrier shows up as an
-    off-axis sideband; its strength is the fringe visibility. Then:
+    FFT the (square-cropped) image, zero the DC cross + center disk (Caleb's
+    filter), find the brightest remaining point (the interference carrier,
+    which sits at one fixed off-axis spatial frequency), and return the
+    carrier's average power divided by the average background power elsewhere.
 
-      - carrier_locked=True (default): integrate only a small window around the
-        brightest off-DC point — the carrier sits at ONE fixed spatial
-        frequency, so this rejects broadband noise and gives a clean, sharply
-        peaked signal to optimize.
-      - carrier_locked=False: integrate everything off-DC (broadband; noisier).
+    This is an SNR-like ratio: empirically ~600–13000 for clear fringes vs
+    ~40 for noise (a >100x separation), and scale-invariant. Normalizing by
+    the BACKGROUND rather than by DC is what gives the separation — the bright
+    beam envelope dominates DC and otherwise swamps the carrier (that made
+    even gorgeous fringes read ~0.004 and never clear the threshold).
 
-    quadrant: by default (None) the carrier is found ANYWHERE off-DC, so the
-    metric works regardless of which diagonal the off-axis tilt puts it in.
-    Pass 1/2/3/4 to restrict to one corner (Caleb's original behavior) — but
-    note his hardcoded 2/4 only works if the tilt happens to point that way.
-
-    Normalized by DC power → a scale-stable fringe-contrast ratio that, unlike
-    `variance`, responds ONLY to the carrier, not beam shape / hot pixels."""
+    quadrant: None (default) finds the carrier anywhere off-DC, so it works
+    regardless of which diagonal the tilt puts it in. Pass 1/2/3/4 to restrict
+    to one corner (Caleb's original 2/4 only works for one tilt direction)."""
     filter_for_quadrant, filter_dc = _caleb_funcs()
     img = _center_crop_square(np.asarray(image, dtype=float))
-    fft = np.fft.fftshift(np.fft.fft2(img))
-    power = np.abs(fft) ** 2
+    power = np.abs(np.fft.fftshift(np.fft.fft2(img))) ** 2
 
     side = filter_for_quadrant(power, quadrant) if quadrant else power.copy()
     side = filter_dc(side, line_filter_width, dc_diameter)  # kill DC cross+disk
 
-    if carrier_locked:
-        py, px = np.unravel_index(int(np.argmax(side)), side.shape)
-        y0, y1 = max(0, py - window), min(side.shape[0], py + window + 1)
-        x0, x1 = max(0, px - window), min(side.shape[1], px + window + 1)
-        sideband = float(np.sum(side[y0:y1, x0:x1]))
-    else:
-        sideband = float(np.sum(side))
+    py, px = np.unravel_index(int(np.argmax(side)), side.shape)
+    y0, y1 = max(0, py - window), min(side.shape[0], py + window + 1)
+    x0, x1 = max(0, px - window), min(side.shape[1], px + window + 1)
+    peak_mean = float(side[y0:y1, x0:x1].mean())
 
-    return sideband / _dc_power(power, dc_diameter)
+    # Background = off-DC power well away from the carrier.
+    bg = side.copy()
+    m = 3 * window
+    bg[max(0, py - m):py + m + 1, max(0, px - m):px + m + 1] = 0
+    vals = bg[bg > 0]
+    bg_mean = float(vals.mean()) if vals.size else 1.0
+    return peak_mean / (bg_mean + 1e-12)
 
 
 def diagnose_fringe_metrics(image):
@@ -93,10 +92,7 @@ def diagnose_fringe_metrics(image):
         "fft_peak_ratio":    calculate_fft_peak_ratio(image),
     }
     try:
-        out["sideband_locked"] = calculate_sideband_energy(
-            image, carrier_locked=True)     # carrier window / DC  (recommended)
-        out["sideband_broadband"] = calculate_sideband_energy(
-            image, carrier_locked=False)    # all off-DC power / DC
+        out["sideband"] = calculate_sideband_energy(image)   # carrier prominence (recommended)
     except Exception as e:
         out["sideband_error"] = str(e)
     return out
@@ -239,12 +235,8 @@ def check_fringes_visible(image, method='variance', threshold=0.15):
         # FFT ratio threshold should be higher (typically > 0.01)
         visible = metric > max(threshold, 0.01)
 
-    elif method in ('sideband', 'sideband_locked'):
-        metric = calculate_sideband_energy(image, carrier_locked=True)
-        visible = metric > threshold
-
-    elif method == 'sideband_quadrant':
-        metric = calculate_sideband_energy(image, carrier_locked=False)
+    elif method == 'sideband':
+        metric = calculate_sideband_energy(image)
         visible = metric > threshold
 
     else:

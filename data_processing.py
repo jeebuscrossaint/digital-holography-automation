@@ -41,6 +41,14 @@ from calebsUsefulFunctions import (
 )
 
 
+def _butter_lp(N, D0, order=4):
+    """Butterworth low-pass mask (centered), used to isolate the demodulated
+    twin from DC and noise (Opt. Express 2026 uses a Butterworth filter)."""
+    y, x = np.ogrid[:N, :N]
+    r = np.hypot(y - N // 2, x - N // 2)
+    return 1.0 / (1.0 + (r / D0) ** (2 * order))
+
+
 class HolographyDataProcessor:
     """Automated processor for holography data"""
     
@@ -56,31 +64,66 @@ class HolographyDataProcessor:
         
         # Processing parameters
         self.proc_config = self.config['processing']
+
+        # --- reconstruction settings (Dobias et al., Opt. Express 2026) ---
+        # float() guards YAML reading e-notation as a string.
+        self._grid        = 100                                   # mode-grid resolution
+        self._core_radius = float(self.proc_config.get('core_radius', 1.7e-5))
+        self._NA          = float(self.proc_config.get('numerical_aperture', 0.11))
+        self._n_eff       = float(self.proc_config.get('effective_index', 1.453))
+        self._num_modes   = int(self.proc_config.get('num_modes', 18))
+        # Parameters optimized per-hologram to maximize fidelity (the paper
+        # optimizes field position, mode-field diameter, and quadratic phase):
+        self._lp_cuts = [22, 30, 40]                              # Butterworth cutoff (px)
+        self._fovs    = [round(v, 9) for v in np.arange(20e-6, 90e-6, 8e-6)]
+        self._phases  = np.arange(-3.0, 3.01, 0.5)               # quadratic-phase factor k
+        self._mode_cache = {}
+        self._opt_modes = None
+        # self.modes generated lazily per-FOV during optimization (_modes_at).
         
-        # Generate LP modes for decomposition
-        print("Generating LP mode basis...")
-        self.generate_lp_modes()
-        
-    def generate_lp_modes(self):
-        """Generate LP mode basis for decomposition"""
-        N = 100  # Matrix size
-        core_radius = self.proc_config['core_radius']
-        NA = self.proc_config['numerical_aperture']
-        wavelength = 1550e-9  # Will adjust per image if needed
-        n_eff = self.proc_config['effective_index']
-        pxz = self.proc_config['pixel_size'] / N
-        
-        self.modes = generateModes(
-            N=N,
-            pxz=pxz,
-            coreRadius=core_radius,
-            NA=NA,
-            wavelength=wavelength,
-            rIndex=n_eff
-        )
-        
-        print(f"  Generated {self.modes.shape[0]} LP modes")
-    
+    def _modes_at(self, fov, wavelength=1.55e-6):
+        """LP-mode basis at a given field-of-view (sets mode-field diameter on
+        the grid). Cached, since the optimizer reuses the same FOV set."""
+        key = (round(fov, 9), round(wavelength, 12))
+        if key not in self._mode_cache:
+            self._mode_cache[key] = generateModes(
+                N=self._grid, pxz=fov / self._grid, coreRadius=self._core_radius,
+                NA=self._NA, wavelength=wavelength, rIndex=self._n_eff)
+        return self._mode_cache[key]
+
+    def _recover_field(self, hologram, lp_cut, lp_order=4, dc_radius=18):
+        """Off-axis recovery (Opt. Express 2026, Sec. 2): FFT the raw intensity,
+        locate the twin sideband sub-pixel, demodulate it to DC, Butterworth
+        low-pass to isolate it, IFFT to the complex field. Returns (ES, centroid).
+        NOTE: FFT the intensity directly — do NOT sqrt it (that was the old bug)."""
+        H = hologram.astype(float)
+        N = H.shape[0]
+        P = np.abs(np.fft.fftshift(np.fft.fft2(H)))
+        cy, cx = N // 2, N // 2
+        yy, xx = np.ogrid[:N, :N]
+        Pm = P.copy()
+        Pm[np.hypot(yy - cy, xx - cx) <= dc_radius] = 0       # mask DC to find carrier
+        py, px = np.unravel_index(int(Pm.argmax()), Pm.shape)
+        w = 6                                                  # sub-pixel refine
+        sub = Pm[py - w:py + w + 1, px - w:px + w + 1]
+        dy, dx = ndimage.center_of_mass(sub)
+        cyy, cxx = py - w + dy, px - w + dx
+        u0, v0 = (cxx - cx) / N, (cyy - cy) / N               # carrier freq (cyc/px)
+        Y, X = np.mgrid[0:N, 0:N]
+        demod = H * np.exp(-2j * np.pi * (u0 * X + v0 * Y))    # shift twin -> DC
+        Sd = np.fft.fftshift(np.fft.fft2(demod)) * _butter_lp(N, lp_cut, lp_order)
+        return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx)
+
+    def _center_on_beam(self, ES, size):
+        """Crop a size×size window centered on the field's intensity centroid."""
+        cy, cx = ndimage.center_of_mass(np.abs(ES) ** 2)
+        cy, cx = int(round(cy)), int(round(cx))
+        N = ES.shape[0]
+        y0 = min(max(cy - size // 2, 0), N - size)
+        x0 = min(max(cx - size // 2, 0), N - size)
+        return ES[y0:y0 + size, x0:x0 + size]
+
+
     def load_hologram(self, filepath):
         """Load hologram image from file
         
@@ -109,130 +152,61 @@ class HolographyDataProcessor:
             Dictionary with processing results
         """
         results = {}
-        
-        # Convert to complex field (hologram is intensity only)
-        field = np.sqrt(hologram.astype(float))
-        
-        # Step 1: Compute FFT
-        print("  [1/6] Computing FFT...")
-        fft_field = fft(field)
-        fft_abs = np.abs(fft_field)
-        
-        results['fft_field'] = fft_field
-        
-        # Step 2: Find center and twin image centroids
-        print("  [2/6] Finding twin image centroids...")
-        
-        # Find DC center (should be at image center)
-        dc_center = np.array(fft_abs.shape) // 2
-        
-        # Find twin images in quadrants 2 and 4 (or 1 and 3)
-        # Filter out DC components first
-        fft_filtered = filterDCComponents(fft_abs.copy(), 
-                                         lineFilterWidth=5, 
-                                         centerFilterDiameter=40)
-        
-        # Find first twin image (quadrant 2 - upper right)
-        _, _, _, centroid1 = findCentroid(fft_field, quadrant=2, maskSize=64)
-        
-        # Find second twin image (quadrant 4 - lower left)  
-        _, _, _, centroid2 = findCentroid(fft_field, quadrant=4, maskSize=64)
-        
-        results['dc_center'] = dc_center
-        results['twin1_centroid'] = centroid1
-        results['twin2_centroid'] = centroid2
-        
-        print(f"    DC center: {dc_center}")
-        print(f"    Twin 1: {centroid1}")
-        print(f"    Twin 2: {centroid2}")
-        
-        # Step 3: Extract twin images
-        print("  [3/6] Extracting twin images...")
-        
-        crop_size = self.proc_config['crop_size']
-        
-        twin1_cropped = cropArray(fft_field, centroid1, crop_size)
-        twin2_cropped = cropArray(fft_field, centroid2, crop_size)
-        
-        # Step 4: Inverse FFT to get recovered field
-        print("  [4/6] Recovering field from twin image...")
-        
-        # Use twin 1 (you could also use twin 2 or combine them)
-        # Pad twin image back to full size centered at DC
-        twin_padded = np.zeros_like(fft_field)
-        center = np.array(twin_padded.shape) // 2
-        start_x = center[0] - crop_size // 2
-        start_y = center[1] - crop_size // 2
-        twin_padded[start_x:start_x+crop_size, start_y:start_y+crop_size] = twin1_cropped
-        
-        # Recover field
-        recovered_field = ifft(twin_padded)
-        recovered_field = normalizeIntensity(recovered_field)
-        
-        results['recovered_field'] = recovered_field
-        
-        # Step 5: Phase correction (optional)
-        print("  [5/6] Applying phase corrections...")
-        
-        if self.proc_config.get('quadratic_phase_correction'):
-            # Try different phase factors to find best match
-            # This would ideally be optimized, but we'll use a default
-            phase_factor = 0.5  # Adjust as needed
-            recovered_field_corrected = applyQuadraticPhase(recovered_field, phase_factor)
-        else:
-            recovered_field_corrected = recovered_field
-        
-        results['recovered_field_corrected'] = recovered_field_corrected
-        
-        # Step 6: Mode decomposition
-        print("  [6/6] Mode decomposition...")
-        
-        # Resize recovered field to match mode size if needed
-        if recovered_field_corrected.shape != self.modes[0].shape:
-            # Simple crop/pad to match
-            field_size = recovered_field_corrected.shape[0]
-            mode_size = self.modes[0].shape[0]
-            
-            if field_size > mode_size:
-                # Crop
-                start = (field_size - mode_size) // 2
-                field_for_decomp = recovered_field_corrected[start:start+mode_size, 
-                                                             start:start+mode_size]
-            else:
-                # Pad
-                field_for_decomp = np.zeros((mode_size, mode_size), dtype=complex)
-                start = (mode_size - field_size) // 2
-                field_for_decomp[start:start+field_size, start:start+field_size] = recovered_field_corrected
-        else:
-            field_for_decomp = recovered_field_corrected
-        
-        # Normalize
-        field_for_decomp = normalizeIntensity(field_for_decomp)
-        
-        # Decompose
-        num_modes = self.proc_config['num_modes']
-        decomp = modeDecomp(field_for_decomp, self.modes, num_modes)
-        
-        # Reconstruct from modes
-        recomp = combinedOutput(self.modes[:num_modes], decomp)
-        recomp = normalizeIntensity(recomp)
-        
-        # Calculate fidelity
-        fidelity = abs(overlap2FieldsV2(field_for_decomp, recomp))
-        
+
+        # Center-crop to a square — Caleb's FFT helpers (filterDCComponents,
+        # findCentroid, generateMask) assume a square frame, but the Bobcat
+        # 320 is 320x256. Without this the DC mask can't broadcast.
+        hologram = np.asarray(hologram)
+        h, w = hologram.shape[:2]
+        if h != w:
+            s = min(h, w)
+            y0, x0 = (h - s) // 2, (w - s) // 2
+            hologram = hologram[y0:y0 + s, x0:x0 + s]
+
+        wl_m = float(wavelength_nm) * 1e-9
+        results['fft_field'] = np.fft.fftshift(np.fft.fft2(hologram.astype(float)))
+
+        # Off-axis recovery + parameter optimization (the paper iterates over
+        # Butterworth cutoff, mode-field diameter/FOV, and the quadratic-phase
+        # factor, keeping the combination with the highest fidelity).
+        print("  Recovering field + optimizing (Butterworth cutoff, mode "
+              "diameter, quadratic phase)...")
+        grid = self._grid
+        best = None
+        for lp in self._lp_cuts:
+            ES_full, centroid = self._recover_field(hologram, lp)
+            base = normalizeIntensity(self._center_on_beam(ES_full, grid))
+            for fov in self._fovs:
+                modes = self._modes_at(fov, wl_m)
+                nm = min(self._num_modes, modes.shape[0])
+                for pf in self._phases:
+                    fld = normalizeIntensity(base * generatePhaseMask(grid, pf))
+                    dec = modeDecomp(fld, modes, nm)
+                    rec = combinedOutput(modes[:nm], dec)
+                    fid = abs(overlap2FieldsV2(fld, rec)) ** 2     # paper's eta (Eq 5)
+                    if best is None or fid > best['fidelity']:
+                        best = dict(fidelity=fid, lp=lp, fov=fov, phase=float(pf),
+                                    nm=nm, field=fld, recomp=normalizeIntensity(rec),
+                                    decomp=dec, recovered_full=ES_full,
+                                    centroid=centroid, modes=modes)
+
+        self._opt_modes = best['modes']
+        decomp = best['decomp']
+        results['recovered_field'] = best['recovered_full']
+        results['recovered_field_corrected'] = best['field']
+        results['reconstructed_field'] = best['recomp']
         results['mode_decomposition'] = decomp
-        results['reconstructed_field'] = recomp
-        results['fidelity'] = fidelity
-        
-        print(f"    Decomposed into {num_modes} modes")
-        print(f"    Reconstruction fidelity: {fidelity:.4f}")
-        
-        # Calculate mode powers
+        results['fidelity'] = best['fidelity']
+        results['twin_centroid'] = best['centroid']
+        results['best_params'] = {k: best[k] for k in ('lp', 'fov', 'phase', 'nm')}
+
         mode_powers = np.abs(decomp) ** 2
-        mode_powers_norm = mode_powers / np.sum(mode_powers)
-        results['mode_powers'] = mode_powers_norm
-        
-        print(f"    Mode powers: {mode_powers_norm}")
+        results['mode_powers'] = (mode_powers / np.sum(mode_powers)
+                                  if mode_powers.sum() > 0 else mode_powers)
+
+        print(f"    Fidelity {best['fidelity']:.3f}  "
+              f"(cutoff={best['lp']}, fov={best['fov']:.1e} m, "
+              f"phase={best['phase']:+.2f}, {best['nm']} modes)")
         
         # Generate plots
         if show_plots or save_plots:
@@ -253,74 +227,61 @@ class HolographyDataProcessor:
             save: Save plots to file
             prefix: Filename prefix for saved plots
         """
+        # One consistent 3x4 grid (the old code mixed a 3x4 and a 3x6 grid,
+        # which made the LP-mode thumbnails draw on top of the bar chart).
+        modes = self._opt_modes if self._opt_modes is not None else []
         fig = plt.figure(figsize=(16, 12))
-        
-        # Original hologram
-        plt.subplot(3, 4, 1)
-        plt.imshow(hologram, cmap='gray')
-        plt.title('Original Hologram')
-        plt.colorbar()
-        
-        # FFT (log scale)
-        plt.subplot(3, 4, 2)
-        pltLogAbs(results['fft_field'])
-        plt.title('FFT (log scale)')
-        
-        # Mark twin images on FFT
+
+        # Row 1: hologram, FFT+twin, received field, recomposed field
+        ax = plt.subplot(3, 4, 1)
+        im = ax.imshow(hologram, cmap='gray')
+        ax.set_title('Original Hologram'); plt.colorbar(im, ax=ax, fraction=0.046)
+
+        ax = plt.subplot(3, 4, 2)
+        ax.imshow(np.log10(np.abs(results['fft_field']) + 1), cmap='viridis')
+        c = results.get('twin_centroid')
+        if c is not None:
+            ax.plot(c[1], c[0], 'rx', markersize=14, markeredgewidth=2)
+        ax.set_title('FFT (log) + twin')
+
         plt.subplot(3, 4, 3)
-        fft_abs = np.abs(results['fft_field'])
-        plt.imshow(np.log10(fft_abs), cmap='viridis')
-        plt.plot(results['twin1_centroid'][1], results['twin1_centroid'][0], 'rx', markersize=15)
-        plt.plot(results['twin2_centroid'][1], results['twin2_centroid'][0], 'rx', markersize=15)
-        plt.title('Twin Image Locations')
-        
-        # Recovered field (amplitude)
-        plt.subplot(3, 4, 5)
-        pltAbs(results['recovered_field'])
-        plt.title('Recovered Field (Amplitude)')
-        
-        # Recovered field (phase)
-        plt.subplot(3, 4, 6)
-        pltAngle(results['recovered_field'])
-        plt.title('Recovered Field (Phase)')
-        
-        # Recovered field (both)
-        plt.subplot(3, 4, 7)
-        pltBoth(results['recovered_field'])
-        plt.title('Recovered Field (Amp+Phase)')
-        
-        # Corrected field
-        plt.subplot(3, 4, 8)
         pltBoth(results['recovered_field_corrected'])
-        plt.title('Phase-Corrected Field')
-        
-        # Reconstructed field from modes
-        plt.subplot(3, 4, 9)
+        plt.title('Received field (amp+phase)')
+
+        plt.subplot(3, 4, 4)
         pltBoth(results['reconstructed_field'])
-        plt.title(f"Reconstructed (Fidelity={results['fidelity']:.3f})")
-        
-        # Mode powers bar chart
-        plt.subplot(3, 4, 10)
-        mode_powers = results['mode_powers']
-        plt.bar(range(len(mode_powers)), mode_powers * 100)
-        plt.xlabel('Mode Number')
-        plt.ylabel('Power (%)')
-        plt.title('Mode Power Distribution')
-        plt.grid(True, alpha=0.3)
-        
-        # Show first few LP modes for reference
-        num_modes_show = min(6, self.modes.shape[0])
-        for i in range(num_modes_show):
-            plt.subplot(3, 6, 13 + i)
-            pltBoth(self.modes[i])
-            plt.title(f'LP Mode {i}', fontsize=8)
-        
+        plt.title(f"Recomposed  (η = {results['fidelity']*100:.1f}%)")
+
+        # Row 2: amplitude, phase, mode-power bar
+        plt.subplot(3, 4, 5)
+        pltAbs(results['recovered_field_corrected'])
+        plt.title('Received amplitude')
+
+        plt.subplot(3, 4, 6)
+        pltAngle(results['recovered_field_corrected'])
+        plt.title('Received phase')
+
+        ax = plt.subplot(3, 4, 7)
+        mp = results['mode_powers']
+        ax.bar(range(len(mp)), np.asarray(mp) * 100)
+        ax.set_xlabel('LP mode'); ax.set_ylabel('Power (%)')
+        ax.set_title('Mode power distribution'); ax.grid(True, alpha=0.3)
+
+        # leave panel 8 empty as a spacer between the row and the mode gallery
+
+        # Row 3: first LP modes of the basis actually used
+        n_show = min(4, len(modes))
+        for i in range(n_show):
+            plt.subplot(3, 4, 9 + i)
+            pltBoth(modes[i])
+            plt.title(f'LP mode {i}', fontsize=9)
+
         plt.tight_layout()
         
         if save and prefix:
             plot_path = self.results_dir / f'{prefix}_analysis.png'
             plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-            print(f"  💾 Plot saved: {plot_path}")
+            print(f"  [saved] Plot: {plot_path}")
         
         if show:
             plt.show()
@@ -385,10 +346,10 @@ class HolographyDataProcessor:
                 
                 all_results.append(results)
                 
-                print(f"  ✓ Completed")
+                print(f"  [ok] Completed")
                 
             except Exception as e:
-                print(f"  ✗ Error processing {filepath.name}: {e}")
+                print(f"  [error] processing {filepath.name}: {e}")
                 import traceback
                 traceback.print_exc()
         
@@ -456,7 +417,7 @@ def main():
         save_plots=not args.no_save_plots
     )
     
-    print("\n✓ Processing finished.\n")
+    print("\n[done] Processing finished.\n")
 
 
 if __name__ == '__main__':
