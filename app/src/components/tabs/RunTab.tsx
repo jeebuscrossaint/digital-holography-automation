@@ -136,7 +136,7 @@ export function RunTab({
   };
 
   return (
-    <div className="px-6 py-5 space-y-4 max-w-5xl">
+    <div className="px-6 py-5 space-y-4">
       <Card>
         <CardHeader><CardTitle>Mode</CardTitle></CardHeader>
         <CardBody>
@@ -246,7 +246,7 @@ export function RunTab({
           </div>
           <div
             className={cn(
-              "aspect-[4/3] w-full bg-[#0a0a0a] rounded border grid place-items-center overflow-hidden",
+              "w-full h-[58vh] min-h-[320px] bg-[#0a0a0a] rounded border grid place-items-center overflow-hidden",
               saturated ? "border-warn" : "border-border",
               frameSrc && "cursor-zoom-in"
             )}
@@ -254,7 +254,8 @@ export function RunTab({
             title={frameSrc ? "Click to expand" : undefined}
           >
             {frameSrc ? (
-              <img src={frameSrc} alt="frame" className="max-h-full max-w-full"
+              <img src={frameSrc} alt="frame"
+                   className="h-full w-auto max-w-full object-contain"
                    style={{ imageRendering: "pixelated" }} />
             ) : (
               <span className="text-faint text-sm">no signal</span>
