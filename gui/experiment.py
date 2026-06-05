@@ -1,0 +1,315 @@
+# -*- coding: utf-8 -*-
+"""The experiment run: collection (sweep legs × wavelengths, optimize
+polarization, validate saturation, save) and processing (reconstruct each
+hologram). This is the single source-of-truth acquisition loop for the app."""
+
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from tkinter import messagebox
+
+from .runtime import CONFIG_FILE
+
+
+class ExperimentMixin:
+    def _start_experiment(self):
+        if not self.hardware_connected:
+            messagebox.showwarning("Not Connected", "Connect hardware first.")
+            return
+        mode = self._run_mode.get()
+        self.experiment_running = True
+        self.stop_event.clear()
+        self._start_btn.configure(state="disabled")
+        self._stop_btn.configure(state="normal")
+        self._progress_var.set(0)
+        self._status_var.set("Starting…")
+        self._log(f"Experiment started (mode: {mode})", "INFO")
+        threading.Thread(target=self._experiment_worker,
+                         args=(mode,), daemon=True).start()
+
+    def _stop_experiment(self):
+        self.stop_event.set()
+        self._stop_btn.configure(state="disabled")
+        self._log("Stop requested — finishing current acquisition…", "WARN")
+
+    def _experiment_worker(self, mode: str):
+        q = self.msg_queue
+        cb = q.put
+
+        try:
+            if mode in ("collect", "full"):
+                self._run_collection(cb)
+            if mode in ("process", "full") and not self.stop_event.is_set():
+                self._run_processing(cb)
+
+            if self.stop_event.is_set():
+                cb({"type": "log", "text": "Experiment stopped by user.", "level": "WARN"})
+                q.put({"type": "done", "event": "experiment", "success": False})
+            else:
+                cb({"type": "log", "text": "✓ Experiment complete!", "level": "OK"})
+                q.put({"type": "done", "event": "experiment", "success": True})
+        except Exception as e:
+            import traceback
+            cb({"type": "log", "text": f"Experiment error: {e}", "level": "ERROR"})
+            cb({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
+            q.put({"type": "done", "event": "experiment", "success": False})
+
+    # ── Collection ────────────────────────────────────────────────────────────
+
+    def _run_collection(self, cb):
+        import numpy as np
+        import yaml
+        from fringe_detection import (check_fringes_visible,
+                                       optimize_polarization_for_fringes,
+                                       check_saturation)
+
+        cfg    = self.config
+        val    = cfg.get("experiment", {}).get("validation", {})
+        sat_level    = float(val.get("saturation_level", 65535))
+        sat_frac_max = float(val.get("max_saturated_fraction", 0.001))
+        legs   = cfg["experiment"]["legs"]
+        wls    = cfg["experiment"]["wavelengths"]
+        waits  = cfg["experiment"]["wait_times"]
+        fdet   = cfg["experiment"]["fringe_detection"]
+        fmt    = cfg["data"]["filename_format"]
+        out    = Path(cfg["data"]["output_dir"])
+        out.mkdir(parents=True, exist_ok=True)
+        module = cfg["hardware"]["fiber_switch"]["module"]
+        total  = len(legs) * len(wls)
+        n      = 0
+
+        if not self.camera:
+            cb({"type": "log",
+                "text": "Camera not connected — cannot collect.", "level": "ERROR"})
+            return
+        if not self.switch and len(legs) > 1:
+            cb({"type": "log",
+                "text": f"Switch not connected — all {len(legs)} legs will be saved at the current optical path.",
+                "level": "WARN"})
+        if not self.laser and len(wls) > 1:
+            cb({"type": "log",
+                "text": f"Laser not connected — all {len(wls)} wavelengths will be saved at the current λ.",
+                "level": "WARN"})
+
+        cb({"type": "log",
+            "text": f"Collection: {len(legs)} legs × {len(wls)} wavelengths = {total} images",
+            "level": "INFO"})
+
+        for li, leg in enumerate(legs):
+            if self.stop_event.is_set():
+                break
+
+            cb({"type": "log", "text": f"── Leg {leg} ──", "level": "INFO"})
+            cb({"type": "progress", "leg": li + 1, "total_legs": len(legs),
+                "status": f"Switching to leg {leg}…"})
+
+            if self.switch:
+                self.switch.move_to_position(module, leg)
+            time.sleep(waits["after_leg_switch"])
+
+            for _wi, wl in enumerate(wls):
+                if self.stop_event.is_set():
+                    break
+
+                n += 1
+                cb({"type": "progress",
+                    "percent": (n - 1) / total * 100,
+                    "leg": li + 1, "total_legs": len(legs),
+                    "wavelength": wl,
+                    "acq": n, "total_acq": total,
+                    "status": f"Leg {leg}, λ={wl} nm — setting wavelength…"})
+
+                if self.laser:
+                    self.laser.changeWavelength(wl)
+                time.sleep(waits["after_wavelength_change"])
+
+                frame = self.camera.getFrame() if self.camera else None
+
+                if frame is not None:
+                    cb({"type": "frame", "data": frame})
+
+                    if fdet["enabled"]:
+                        method    = fdet["check_method"]
+                        threshold = fdet["min_visibility"]
+                        ok, metric = check_fringes_visible(frame, method, threshold)
+                        cb({"type": "progress", "fringe_metric": metric,
+                            "status": f"Leg {leg}, λ={wl} nm — fringe: {metric:.3f}"})
+
+                        if not ok and self.motors:
+                            cb({"type": "log",
+                                "text": f"  Low fringes ({metric:.3f}) — optimizing polarization…",
+                                "level": "WARN"})
+                            success, best, _ = optimize_polarization_for_fringes(
+                                self.camera, self.motors,
+                                max_attempts=fdet["max_attempts"],
+                                method=method, threshold=threshold)
+                            if success:
+                                cb({"type": "log",
+                                    "text": f"  ✓ Polarization optimized (metric={best:.3f})",
+                                    "level": "OK"})
+                                time.sleep(waits["after_polarization_adjust"])
+                                frame = self.camera.getFrame()
+                                if frame is not None:
+                                    cb({"type": "frame", "data": frame})
+                            else:
+                                cb({"type": "log",
+                                    "text": f"  ⚠ Could not optimize (best={best:.3f}) — saving anyway",
+                                    "level": "WARN"})
+                        elif ok:
+                            cb({"type": "log",
+                                "text": f"  ✓ Fringes OK ({metric:.3f})", "level": "OK"})
+                else:
+                    cb({"type": "log",
+                        "text": "  ✗ Frame capture failed — skipping", "level": "WARN"})
+
+                if frame is not None:
+                    # Saturation/clipping check — a clipped fringe is no longer
+                    # a clean sinusoid, so its FFT sideband (and the recovered
+                    # amplitude/phase) are corrupted. Flag it; still save so the
+                    # raw data isn't lost, but mark it invalid in metadata.
+                    sat = check_saturation(frame, sat_level=sat_level,
+                                           sat_fraction_max=sat_frac_max)
+                    if sat["saturated"]:
+                        cb({"type": "log",
+                            "text": (f"  ⚠ SATURATED — {sat['fraction']*100:.2f}% "
+                                     f"of pixels clipped (max {sat['max_value']}/"
+                                     f"{int(sat_level)}). Data INVALID — reduce "
+                                     f"exposure or laser power."),
+                            "level": "WARN"})
+
+                    fname = fmt.format(leg=leg, wavelength=wl)
+                    fpath = out / fname
+                    np.save(fpath, frame)
+
+                    if cfg["data"]["save_metadata"]:
+                        try:
+                            angles = list(self.motors.angles)
+                        except Exception:
+                            angles = [0, 0, 0]
+                        meta = {"leg": leg, "wavelength_nm": wl,
+                                "timestamp": datetime.now().isoformat(),
+                                "motor_angles": angles,
+                                "saturated": bool(sat["saturated"]),
+                                "saturated_fraction": float(sat["fraction"]),
+                                "max_value": int(sat["max_value"]),
+                                "fill_fraction": float(sat["fill_fraction"])}
+                        with open(fpath.with_suffix(".yaml"), "w") as f:
+                            yaml.dump(meta, f)
+
+                    tag = "WARN" if sat["saturated"] else "OK"
+                    flag = "  ⚠ invalid(saturated)" if sat["saturated"] else ""
+                    cb({"type": "log", "text": f"  💾 {fname}{flag}", "level": tag})
+
+                cb({"type": "progress",
+                    "percent": n / total * 100,
+                    "acq": n, "total_acq": total,
+                    "status": f"Completed {n}/{total} images"})
+
+        cb({"type": "log",
+            "text": f"Collection done — {n} images saved to {out}", "level": "OK"})
+
+    # ── Processing ────────────────────────────────────────────────────────────
+
+    def _run_processing(self, cb):
+        import yaml
+
+        cb({"type": "log",  "text": "Starting data processing…", "level": "INFO"})
+        cb({"type": "progress", "status": "Loading processor…", "percent": 0})
+
+        try:
+            from data_processing import HolographyDataProcessor
+            proc = HolographyDataProcessor(config_file=CONFIG_FILE)
+        except Exception as e:
+            cb({"type": "log", "text": f"Processor init failed: {e}", "level": "ERROR"})
+            return
+
+        files = sorted(Path(proc.data_dir).glob("leg*.npy"))
+        if not files:
+            cb({"type": "log",
+                "text": "No hologram files found — run collection first", "level": "WARN"})
+            return
+
+        cb({"type": "log", "text": f"Found {len(files)} holograms", "level": "INFO"})
+
+        for i, fpath in enumerate(files):
+            if self.stop_event.is_set():
+                break
+
+            cb({"type": "progress",
+                "percent": i / len(files) * 100,
+                "status":  f"Processing {fpath.name} ({i+1}/{len(files)})",
+                "acq": i + 1, "total_acq": len(files)})
+            cb({"type": "log", "text": f"Processing: {fpath.name}", "level": "INFO"})
+
+            try:
+                hologram = proc.load_hologram(fpath)
+                wl = 1550
+                meta_f = fpath.with_suffix(".yaml")
+                if meta_f.exists():
+                    with open(meta_f) as f:
+                        wl = yaml.safe_load(f).get("wavelength_nm", 1550)
+
+                results = proc.process_single_hologram(
+                    hologram, wavelength_nm=wl,
+                    show_plots=False, save_plots=True,
+                    plot_prefix=fpath.stem)
+                powers_str = " ".join(
+                    f"{p*100:.1f}%" for p in results["mode_powers"][:5])
+                cb({"type": "log",
+                    "text": f"  ✓ Fidelity: {results['fidelity']:.4f}  [{powers_str}]",
+                    "level": "OK"})
+            except Exception as e:
+                import traceback
+                cb({"type": "log", "text": f"  ✗ {e}", "level": "ERROR"})
+                cb({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
+
+        cb({"type": "progress", "percent": 100, "status": "Processing complete"})
+        cb({"type": "log", "text": "Data processing complete", "level": "OK"})
+
+    # ── Done handler ──────────────────────────────────────────────────────────
+
+    def _on_done(self, event: str, success: bool):
+        self.experiment_running = False
+        self._stop_btn.configure(state="disabled")
+
+        if event == "connect":
+            ok    = getattr(self, "_connected_names", [])
+            all_4 = ("Laser", "Camera", "Switch", "Motors")
+            off   = [d for d in all_4 if d not in ok]
+
+            self._connect_btn.configure(state="disabled")
+            self._disconnect_btn.configure(state="normal")
+
+            if len(ok) == 4:
+                self._status_var.set("All 4 devices connected — ready to run")
+                self._log("All hardware connected. Press ▶ START when ready.", "OK")
+            elif len(ok) == 0:
+                self._status_var.set("No devices connected — check cables & config")
+                self._log("No devices connected. Check cables, COM ports, and GPIB address.", "ERROR")
+                # Re-enable connect so they can retry after fixing things
+                self._connect_btn.configure(state="normal")
+                self._disconnect_btn.configure(state="disabled")
+            else:
+                summary = f"{len(ok)}/4 connected: {', '.join(ok)}"
+                missing = f"Offline: {', '.join(off)}"
+                self._status_var.set(f"{summary} — {missing}")
+                self._log(f"{summary}", "OK")
+                self._log(f"{missing} — plug in and click Connect to retry", "WARN")
+
+            # Enable START as long as something is connected
+            self._start_btn.configure(state="normal" if ok else "disabled")
+            # Initialize Polarization tab slider targets from the actual angles
+            if "Motors" in ok:
+                self._sync_paddle_targets_from_hw()
+        elif event == "experiment":
+            self._start_btn.configure(
+                state="normal" if self.hardware_connected else "disabled")
+            if success:
+                self._progress_var.set(100)
+                self._status_var.set("Experiment complete!")
+                self._refresh_results()
+                messagebox.showinfo("Done",
+                    "Experiment completed successfully!\nCheck the Results tab.")
+            else:
+                self._status_var.set("Stopped / error — see log")
