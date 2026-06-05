@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
-import { Play, Square, Camera, AlertTriangle, Maximize2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Play, Square, Camera, AlertTriangle, Maximize2, X, ZoomIn, ZoomOut, FolderOpen } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, ExperimentState } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,33 @@ export function RunTab({
   const wasSat = useRef(false);
   const [expanded, setExpanded] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [outputDir, setOutputDir] = useState<string>("");
+
+  // Load the configured output directory
+  useEffect(() => {
+    let alive = true;
+    api.configGet()
+      .then((cfg) => { if (alive) setOutputDir(cfg?.data?.output_dir ?? ""); })
+      .catch(() => { /* ignore */ });
+    return () => { alive = false; };
+  }, []);
+
+  const chooseFolder = async () => {
+    try {
+      const picked = await openDialog({ directory: true, multiple: false,
+                                        defaultPath: outputDir || undefined,
+                                        title: "Choose where to save holograms" });
+      if (!picked || Array.isArray(picked)) return;
+      const cfg = await api.configGet();
+      cfg.data = cfg.data ?? {};
+      cfg.data.output_dir = picked;
+      await api.configSet(cfg);
+      setOutputDir(picked);
+      onLog(`Saving data to: ${picked}`, "OK");
+    } catch (e: any) {
+      onLog(`Folder pick failed: ${e}`, "WARN");
+    }
+  };
 
   // Esc closes the expanded view
   useEffect(() => {
@@ -141,6 +169,20 @@ export function RunTab({
               onClick={stop}
             >
               <Square className="h-4 w-4" /> Stop
+            </Button>
+          </div>
+
+          {/* Where data gets saved — confirm/change before each run */}
+          <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border/60">
+            <span className="text-xs text-faint font-mono uppercase tracking-wider whitespace-nowrap">
+              Save to
+            </span>
+            <span className="flex-1 min-w-0 truncate text-sm text-soft font-mono"
+                  title={outputDir}>
+              {outputDir || "—"}
+            </span>
+            <Button variant="outline" disabled={state.running} onClick={chooseFolder}>
+              <FolderOpen className="h-4 w-4" /> Choose…
             </Button>
           </div>
         </CardBody>
