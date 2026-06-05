@@ -32,8 +32,11 @@ export const api = {
                          "polarization_auto_optimize"),
 
   // Camera
-  cameraFrame:   () => rpc<{ width: number; height: number; data: string } | null>(
-                         "camera_frame"),
+  cameraFrame:   () => rpc<CameraFrame | null>("camera_frame"),
+  cameraSetExposure: (us: number) => rpc<{ exposure_us: number }>(
+                         "camera_set_exposure", { us }),
+  cameraSnapshot: () => rpc<{ file: string; sideband_metric: number | null }>(
+                         "camera_snapshot"),
 
   // Experiment + config
   configGet:     () => rpc<any>("config_get"),
@@ -44,6 +47,15 @@ export const api = {
 };
 
 // Types
+export interface CameraFrame {
+  width: number;
+  height: number;
+  data: string;                 // base64 PNG
+  saturated?: boolean;
+  fill_fraction?: number;
+  saturated_fraction?: number;
+}
+
 export type ConnectionState = "offline" | "connecting" | "online" | "error";
 
 export interface HardwareStatus {

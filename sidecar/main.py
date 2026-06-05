@@ -17,8 +17,14 @@ import time
 import traceback
 from pathlib import Path
 
-# Make sure we can import hardware/ and lib/ siblings of this directory
-ROOT = Path(__file__).parent.parent
+# Make sure we can import hardware/ and lib/ siblings of this directory.
+# When frozen by PyInstaller, those are unpacked under sys._MEIPASS (added via
+# --add-data); otherwise they sit next to the repo root. Resolving this wrong
+# is why the bundled sidecar failed with "No module named polMotors".
+if getattr(sys, "frozen", False):
+    ROOT = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+else:
+    ROOT = Path(__file__).parent.parent
 for sub in ("hardware", "lib"):
     p = ROOT / sub
     if p.exists() and str(p) not in sys.path:
@@ -35,7 +41,12 @@ if os.path.exists(_XENETH):
 
 import yaml  # noqa: E402
 
-CONFIG_FILE = ROOT / "experiment_config.yaml"
+# Config is editable runtime data, so it lives beside the exe (frozen) or at
+# the repo root (dev) — never inside the PyInstaller bundle.
+if getattr(sys, "frozen", False):
+    CONFIG_FILE = Path(sys.executable).parent / "experiment_config.yaml"
+else:
+    CONFIG_FILE = ROOT / "experiment_config.yaml"
 
 
 # ── State container ──────────────────────────────────────────────────────────
@@ -58,6 +69,7 @@ class State:
         self.exp_acq     = 0
         self.exp_total   = 0
         self._last_frame = None
+        self._last_raw = None
 
     def _load_config(self):
         try:
@@ -98,7 +110,7 @@ def _connect_camera():
     cfg = STATE.config.get("hardware", {}).get("camera", {})
     url = cfg.get("url", "cam://0") or "cam://0"
     from XenicsCam import xCam
-    cam = xCam(url=url)
+    cam = xCam(url=url, exposure=cfg.get("exposure_time"))
     ser = int(cam.ser) if cam.ser else "?"
     return cam, f"Camera Xenics Bobcat 320 GigE SER:{ser}"
 
@@ -201,14 +213,19 @@ def h_laser_get(_):
     except Exception:
         pass
     try:
-        raw = STATE.laser.checkPowerAmplitude()
-        v = float(raw)
-        if "e" in str(raw).lower() or abs(v) < 0.1:
-            uw = v * 1e6
-        elif abs(v) < 50:
-            uw = 10 ** (v / 10) * 1000
+        v = float(STATE.laser.checkPowerAmplitude())
+        # Infer dBm/W/uW from SIGN and MAGNITUDE, not text format — uW/W are
+        # always positive, so anything negative is dBm. (The old "'e' in
+        # string => watts" check turned a dBm value like "-3.01E0" into
+        # -3,010,300 uW.)
+        if v < 0:
+            uw = 10 ** (v / 10) * 1000        # negative => dBm
+        elif abs(v) < 1e-2:
+            uw = v * 1e6                      # tiny +ve => watts
+        elif v < 10:
+            uw = 10 ** (v / 10) * 1000        # small +ve => dBm
         else:
-            uw = v
+            uw = v                            # already uW
         s["power_uw"] = float(uw)
     except Exception:
         pass
@@ -313,14 +330,25 @@ def h_camera_frame(_):
         if frame is None: return None
         import numpy as np
         from PIL import Image
-        arr = np.asarray(frame, dtype=float)
+        raw = np.asarray(frame)
+        STATE._last_raw = raw                     # keep raw 16-bit for snapshot
+        # Saturation read so the UI can warn while aligning.
+        sat = {}
+        try:
+            from fringe_detection import check_saturation
+            val = STATE.config.get("experiment", {}).get("validation", {})
+            sat = check_saturation(
+                raw, sat_level=float(val.get("saturation_level", 65535)),
+                sat_fraction_max=float(val.get("max_saturated_fraction", 0.001)))
+        except Exception:
+            pass
+        arr = raw.astype(float)
         mn, mx = arr.min(), arr.max()
         if mx > mn:
             arr = (arr - mn) / (mx - mn) * 255
         arr = arr.astype(np.uint8)
         img = Image.fromarray(arr, mode="L")
-        # Downscale to keep messages small
-        img.thumbnail((640, 480))
+        img.thumbnail((640, 480))             # keep messages small
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
         STATE._last_frame = buf.getvalue()
@@ -328,9 +356,54 @@ def h_camera_frame(_):
             "width":  img.width,
             "height": img.height,
             "data":   base64.b64encode(STATE._last_frame).decode("ascii"),
+            "saturated": bool(sat.get("saturated", False)),
+            "fill_fraction": float(sat.get("fill_fraction", 0.0)),
+            "saturated_fraction": float(sat.get("fraction", 0.0)),
         }
     except Exception:
         return None
+
+
+def h_camera_set_exposure(params):
+    if STATE.camera is None: raise RuntimeError("Camera not connected")
+    actual = STATE.camera.setExposure(float(params["us"]))
+    return {"exposure_us": float(actual)}
+
+
+def h_camera_snapshot(_):
+    """Save the current frame as a hologram (raw .npy + .png + .yaml metadata)
+    into the data dir — the quick way to capture data without a full run."""
+    if STATE.camera is None: raise RuntimeError("Camera not connected")
+    import numpy as np
+    import datetime
+    raw = getattr(STATE, "_last_raw", None)
+    if raw is None:
+        raw = STATE.camera.getFrame()
+    if raw is None: raise RuntimeError("No frame available")
+    raw = np.asarray(raw)
+    out = Path(STATE.config.get("data", {}).get("output_dir", "./holography_data"))
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = out / f"snapshot_{stamp}"
+    np.save(str(base) + ".npy", raw)
+    meta = {"timestamp": datetime.datetime.now().isoformat(),
+            "max_value": int(raw.max()), "mean": float(raw.mean())}
+    try:
+        from fringe_detection import calculate_sideband_energy, check_saturation
+        meta["sideband_metric"] = float(calculate_sideband_energy(raw))
+        meta["saturated"] = bool(check_saturation(raw)["saturated"])
+    except Exception:
+        pass
+    try:
+        from PIL import Image
+        a = raw.astype(float); mn, mx = a.min(), a.max()
+        disp = (((a - mn) / (mx - mn)) * 255).astype("uint8") if mx > mn else a.astype("uint8")
+        Image.fromarray(disp, mode="L").save(str(base) + ".png")
+    except Exception:
+        pass
+    with open(str(base) + ".yaml", "w") as f:
+        yaml.dump(meta, f)
+    return {"file": base.name, "sideband_metric": meta.get("sideband_metric")}
 
 
 # Config ---------------------------------------------------------------------
@@ -510,6 +583,8 @@ HANDLERS = {
     "motors_home_all":              h_motors_home_all,
     "polarization_auto_optimize":   h_polarization_auto_optimize,
     "camera_frame":                 h_camera_frame,
+    "camera_set_exposure":          h_camera_set_exposure,
+    "camera_snapshot":              h_camera_snapshot,
     "config_get":                   h_config_get,
     "config_set":                   h_config_set,
     "experiment_start":             h_experiment_start,

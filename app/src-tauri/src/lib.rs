@@ -96,13 +96,32 @@ fn sidecar() -> Result<Arc<Mutex<Sidecar>>> {
 ///
 /// Returns (program, args_to_pass_before_user_input).
 fn python_command() -> Result<(PathBuf, Vec<PathBuf>)> {
-    // 1) Look for the bundled PyInstaller exe (production)
+    // In dev (debug builds) always run the live source so Python changes take
+    // effect without rebuilding the PyInstaller sidecar. (The old code always
+    // preferred the bundled exe, so `tauri dev` ran a stale build.) In release,
+    // prefer the bundled exe so lab machines need no Python install.
+    if cfg!(debug_assertions) {
+        if let Some(dev) = dev_sidecar() {
+            eprintln!("[sidecar] dev mode: {:?}", dev);
+            return Ok(dev);
+        }
+    }
     if let Some(bundled) = bundled_sidecar_path() {
         if bundled.exists() {
             return Ok((bundled, vec![]));
         }
     }
-    // 2) Dev fallback: run the .py source with a discoverable python
+    dev_sidecar().ok_or_else(|| anyhow!(
+        "no sidecar found: build it (tools/build_sidecar.py) or set up the .venv"
+    ))
+}
+
+/// Dev sidecar: run sidecar/main.py with the project's Python interpreter.
+fn dev_sidecar() -> Option<(PathBuf, Vec<PathBuf>)> {
+    let script = repo_root().join("sidecar").join("main.py");
+    if !script.exists() {
+        return None;
+    }
     let exe = std::env::var_os("HOLOGRAPHY_PYTHON")
         .map(PathBuf::from)
         .or_else(|| {
@@ -110,11 +129,7 @@ fn python_command() -> Result<(PathBuf, Vec<PathBuf>)> {
             if venv.exists() { Some(venv) } else { None }
         })
         .unwrap_or_else(|| PathBuf::from("python"));
-    let script = repo_root().join("sidecar").join("main.py");
-    if !script.exists() {
-        return Err(anyhow!("sidecar script missing at {:?}", script));
-    }
-    Ok((exe, vec![script]))
+    Some((exe, vec![script]))
 }
 
 /// Where the PyInstaller-built sidecar lives. Tauri bundles sidecar

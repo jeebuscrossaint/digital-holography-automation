@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
-import { Play, Square } from "lucide-react";
+import { Input } from "../ui/Input";
+import { Play, Square, Camera, AlertTriangle } from "lucide-react";
 import { api, ExperimentState } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,10 @@ export function RunTab({
     leg: null, wavelength: null, acq: 0, total: 0,
   });
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
+  const [expTarget, setExpTarget] = useState("1000");
+  const [saturated, setSaturated] = useState(false);
+  const [fill, setFill] = useState<number | null>(null);
+  const wasSat = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -46,12 +51,40 @@ export function RunTab({
         const f = await api.cameraFrame();
         if (alive && f) {
           setFrameSrc(`data:image/png;base64,${f.data}`);
+          setSaturated(!!f.saturated);
+          setFill(f.fill_fraction ?? null);
+          // Log only on the not-saturated -> saturated transition.
+          if (f.saturated && !wasSat.current) {
+            onLog(`⚠ Camera saturating — ${((f.saturated_fraction ?? 0) * 100).toFixed(2)}% `
+                  + `of pixels clipped. Lower exposure or laser power.`, "WARN");
+          } else if (!f.saturated && wasSat.current) {
+            onLog("✓ Saturation cleared.", "OK");
+          }
+          wasSat.current = !!f.saturated;
         }
       } catch { /* ignore */ }
     };
     const id = setInterval(tick, 500);
     return () => { alive = false; clearInterval(id); };
-  }, []);
+  }, [onLog]);
+
+  const setExposure = async () => {
+    const v = parseFloat(expTarget);
+    if (!isFinite(v)) return;
+    onLog(`Camera exposure → ${v.toFixed(0)} µs`);
+    try {
+      const r = await api.cameraSetExposure(v);
+      onLog(`Exposure now ${r.exposure_us.toFixed(0)} µs`, "OK");
+    } catch (e: any) { onLog(`Set exposure failed: ${e}`, "WARN"); }
+  };
+
+  const snapshot = async () => {
+    try {
+      const r = await api.cameraSnapshot();
+      const sb = r.sideband_metric != null ? `  (sideband=${r.sideband_metric.toFixed(0)})` : "";
+      onLog(`📷 Saved ${r.file}.npy (+png +yaml)${sb}`, "OK");
+    } catch (e: any) { onLog(`Snapshot failed: ${e}`, "WARN"); }
+  };
 
   const start = async () => {
     onLog(`Experiment started (${mode})`);
@@ -127,7 +160,38 @@ export function RunTab({
       <Card>
         <CardHeader><CardTitle>Camera preview</CardTitle></CardHeader>
         <CardBody>
-          <div className="aspect-[4/3] w-full bg-[#0a0a0a] rounded border border-border grid place-items-center overflow-hidden">
+          <div className="flex items-center gap-3 flex-wrap mb-3">
+            <span className="text-xs text-faint font-mono uppercase tracking-wider">Exposure</span>
+            <Input
+              className="w-28"
+              value={expTarget}
+              onChange={(e) => setExpTarget(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && setExposure()}
+            />
+            <span className="text-xs text-faint">µs</span>
+            <Button variant="primary" disabled={!online} onClick={setExposure}>Set</Button>
+            <Button variant="outline" disabled={!online} onClick={snapshot}>
+              <Camera className="h-4 w-4" /> Save snapshot
+            </Button>
+            <div className="flex-1" />
+            {fill != null && (
+              <span className={cn(
+                "text-xs tabular-nums",
+                saturated ? "text-warn" : "text-faint"
+              )}>
+                fill {(fill * 100).toFixed(0)}%
+              </span>
+            )}
+            {saturated && (
+              <span className="flex items-center gap-1 text-xs text-warn font-medium">
+                <AlertTriangle className="h-3.5 w-3.5" /> SATURATING
+              </span>
+            )}
+          </div>
+          <div className={cn(
+            "aspect-[4/3] w-full bg-[#0a0a0a] rounded border grid place-items-center overflow-hidden",
+            saturated ? "border-warn" : "border-border"
+          )}>
             {frameSrc ? (
               <img src={frameSrc} alt="frame" className="max-h-full max-w-full" />
             ) : (
