@@ -44,8 +44,15 @@ experiment:
   fringe_detection:
     enabled: true
     min_visibility: 0.15
-    max_attempts: 5
-    check_method: variance
+    max_attempts: 60
+    check_method: sideband
+  validation:
+    # A hologram is invalid if fringe peaks clip the ADC (Mono16 full scale =
+    # 65535): clipping distorts the FFT sideband. Frame is flagged if more
+    # than max_saturated_fraction of pixels reach saturation_level. Confirm
+    # the exact cutoff with Caleb.
+    saturation_level: 65535
+    max_saturated_fraction: 0.001
   polarization:
     auto_adjust: true
     search_method: grid
@@ -59,8 +66,8 @@ data:
   save_metadata: true
 processing:
   image_size:
-  - 640
-  - 512
+  - 320
+  - 256
   crop_size: 100
   num_modes: 7
   core_radius: 25e-6
