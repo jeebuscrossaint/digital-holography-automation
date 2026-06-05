@@ -60,7 +60,7 @@ class HolographyDataProcessor:
         
         self.data_dir = Path(self.config['data']['output_dir'])
         self.results_dir = self.data_dir / 'processed_results'
-        self.results_dir.mkdir(exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         
         # Processing parameters
         self.proc_config = self.config['processing']
@@ -105,9 +105,14 @@ class HolographyDataProcessor:
         Pm[np.hypot(yy - cy, xx - cx) <= dc_radius] = 0       # mask DC to find carrier
         py, px = np.unravel_index(int(Pm.argmax()), Pm.shape)
         w = 6                                                  # sub-pixel refine
-        sub = Pm[py - w:py + w + 1, px - w:px + w + 1]
+        # Clamp the window to the array — if the carrier is within w px of an
+        # edge, negative slice indices would wrap to the far edge and give a
+        # bogus centroid (wrong carrier freq -> wrong reconstruction).
+        y0, y1 = max(py - w, 0), min(py + w + 1, N)
+        x0, x1 = max(px - w, 0), min(px + w + 1, N)
+        sub = Pm[y0:y1, x0:x1]
         dy, dx = ndimage.center_of_mass(sub)
-        cyy, cxx = py - w + dy, px - w + dx
+        cyy, cxx = y0 + dy, x0 + dx
         u0, v0 = (cxx - cx) / N, (cyy - cy) / N               # carrier freq (cyc/px)
         Y, X = np.mgrid[0:N, 0:N]
         demod = H * np.exp(-2j * np.pi * (u0 * X + v0 * Y))    # shift twin -> DC
@@ -172,6 +177,10 @@ class HolographyDataProcessor:
         print("  Recovering field + optimizing (Butterworth cutoff, mode "
               "diameter, quadratic phase)...")
         grid = self._grid
+        # Quadratic-phase masks depend only on (grid, phase) — precompute the
+        # 13 unique masks once instead of regenerating one per (lp, fov, phase).
+        phase_masks = {float(pf): generatePhaseMask(grid, pf)
+                       for pf in self._phases}
         best = None
         for lp in self._lp_cuts:
             ES_full, centroid = self._recover_field(hologram, lp)
@@ -180,7 +189,7 @@ class HolographyDataProcessor:
                 modes = self._modes_at(fov, wl_m)
                 nm = min(self._num_modes, modes.shape[0])
                 for pf in self._phases:
-                    fld = normalizeIntensity(base * generatePhaseMask(grid, pf))
+                    fld = normalizeIntensity(base * phase_masks[float(pf)])
                     dec = modeDecomp(fld, modes, nm)
                     rec = combinedOutput(modes[:nm], dec)
                     fid = abs(overlap2FieldsV2(fld, rec)) ** 2     # paper's eta (Eq 5)
