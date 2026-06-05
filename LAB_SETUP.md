@@ -75,10 +75,25 @@ and, if a release build is present, for the bundled sidecar `.exe`.
 
 ## Running
 
-### The tkinter app — what the lab uses today (recommended)
+### Native desktop app — the deliverable (single .exe, recommended)
 
-The current working app is the tkinter GUI (`main.py`). It needs the venv
-(via `uv`) but no Node/Rust toolchain:
+The shipping app is the tkinter GUI packaged as **one native Windows
+executable** — no Python, Node, web server, or WebView2 on the target machine.
+
+Build it (on a dev machine with the venv):
+```sh
+uv run python tools/build_app.py        # -> dist/Digital Holography.exe
+```
+Then copy `dist/Digital Holography.exe` to the lab machine and double-click it.
+Editable data (experiment_config.yaml, session.log, holography_data/) is created
+**next to the .exe**, so put it in its own folder. The two hardware SDKs
+(Keysight IO Libraries + Xenics Xeneth) and the camera firewall rule
+(`tools/setup_lab_machine.ps1`) still need to be set up once per machine.
+
+### Running from source (tkinter)
+
+If you have the repo + venv, you can run the same GUI without packaging — needs
+`uv` but no Node/Rust:
 
 ```sh
 git clone <repo-url>
