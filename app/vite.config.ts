@@ -3,15 +3,34 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import fs from "node:fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function gitShortSha(): string {
+  // Read the SHA straight from .git so it works even when the `git` binary
+  // isn't on PATH (common on freshly-set-up Windows machines — otherwise this
+  // showed "unknown").
   try {
-    return execSync("git rev-parse --short HEAD", { cwd: __dirname })
-      .toString().trim();
+    const gitDir = path.join(__dirname, "..", ".git");
+    let head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+    if (head.startsWith("ref:")) {
+      const ref = head.slice(4).trim();
+      const refPath = path.join(gitDir, ref);
+      if (fs.existsSync(refPath)) {
+        head = fs.readFileSync(refPath, "utf8").trim();
+      } else {
+        const packed = fs.readFileSync(path.join(gitDir, "packed-refs"), "utf8");
+        const line = packed.split("\n").find((l) => l.trim().endsWith(ref));
+        if (line) head = line.split(" ")[0];
+      }
+    }
+    if (/^[0-9a-f]{7,40}$/.test(head)) return head.slice(0, 7);
+  } catch { /* fall through to git binary */ }
+  try {
+    return execSync("git rev-parse --short HEAD", { cwd: __dirname }).toString().trim();
   } catch {
-    return "unknown";
+    return "dev";
   }
 }
 function gitDirty(): boolean {

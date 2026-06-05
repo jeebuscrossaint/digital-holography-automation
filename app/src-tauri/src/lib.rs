@@ -242,7 +242,14 @@ pub fn run() {
             let menu = MenuBuilder::new(app)
                 .item(&app_menu).item(&file_menu).item(&exp_menu)
                 .item(&view_menu).item(&win_menu).build()?;
+            // On macOS this is the global menu bar (good). On Windows it renders
+            // as an in-window menu strip that clashes with the custom titlebar
+            // ("File View Window" bleeding through), so don't attach it there —
+            // keyboard shortcuts + the in-app buttons cover the same actions.
+            #[cfg(not(target_os = "windows"))]
             app.set_menu(menu)?;
+            #[cfg(target_os = "windows")]
+            let _ = menu;
 
             // Route menu clicks to the frontend as a Tauri event
             app.on_menu_event(|app, event| {
