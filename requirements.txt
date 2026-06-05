@@ -1,19 +1,21 @@
-# Python Requirements for Photonic Lantern Digital Holography Automation
-# 
-# Installation:
-#   pip install -r requirements.txt
+# Python requirements — Photonic Lantern Digital Holography Automation
 #
-# Note: Some packages require special installation (see README.md):
-#   - Xeneth SDK: Install from "C:\Program Files\Xeneth\Sdk\Python\..."
-#   - Thorlabs Kinesis: Download from Thorlabs website
+# Preferred install is uv (uses pyproject.toml + uv.lock):
+#     uv sync
+# This file is a pip fallback:
+#     pip install -r requirements.txt
+#
+# Two SDKs install separately (not on PyPI) — see LAB_SETUP.md:
+#   - Xenics Xeneth (camera)         - Thorlabs Kinesis (motors, DLLs in vendor/)
 
-# Core scientific packages
-numpy>=1.20.0
-scipy>=1.7.0
-matplotlib>=3.4.0
+# Core scientific stack
+numpy>=2.4.2
+scipy>=1.17.1
+matplotlib>=3.10.8
 
-# Configuration and data
-pyyaml>=5.4.0
+# Config + data
+pyyaml>=6.0.3
+pillow>=8.0.0
 
 # Hardware communication
 pyserial>=3.5
@@ -21,18 +23,9 @@ pyvisa>=1.11.0
 pyvisa-py>=0.5.0
 gpib-ctypes>=0.3.0
 
-# Image processing (PIL for camera preview in GUI)
-Pillow>=8.0.0
-
-# Windows 11 Fluent theme for the tkinter GUI
+# tkinter app — Windows 11 Fluent theme
 sv-ttk>=2.6.0
 
-# Xeneth camera SDK (must be installed separately)
-# Install after installing Xeneth software:
-# pip install "C:\Program Files\Xeneth\Sdk\Python\xenics-3.x.x-py3-none-any.whl"
-
-# Optional: For enhanced functionality
-# ipython>=7.0.0  # Interactive shell
-# jupyter>=1.0.0  # Jupyter notebooks
-# pandas>=1.3.0   # Data analysis
-# tqdm>=4.60.0    # Progress bars
+# Optional web frontend (headless NUC over Tailscale) — server/main.py
+fastapi>=0.115.0
+uvicorn>=0.34.0
