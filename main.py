@@ -332,6 +332,8 @@ class HolographyApp:
         ttk.Label(expf, text="µs", foreground=MUTED).pack(side="left", padx=(2, 6))
         ttk.Button(expf, text="Set", style="Accent.TButton",
                    command=self._set_exposure).pack(side="left", padx=2)
+        ttk.Button(expf, text="📷 Save snapshot",
+                   command=self._save_snapshot).pack(side="left", padx=(16, 2))
         ttk.Label(expf, text="↑ brighten / saturate   ↓ avoid clipping",
                   foreground=MUTED, font=self._font_small).pack(side="left", padx=(10, 0))
 
@@ -369,6 +371,72 @@ class HolographyApp:
         except Exception as e:
             self.msg_queue.put({"type": "log",
                                 "text": f"Set exposure failed: {e}", "level": "WARN"})
+
+    def _save_snapshot(self):
+        """Save the current camera frame as a hologram for analysis — raw .npy
+        (16-bit, for processing) + .png (preview) + .yaml (metadata). Works
+        without the switch, so it's the quick way to hand the PI some data."""
+        import numpy as np
+        frame = self._last_frame
+        if frame is None:
+            self._log("No frame to save — connect the camera and wait for preview.",
+                      "WARN")
+            return
+        threading.Thread(target=self._save_snapshot_worker,
+                         args=(np.asarray(frame),), daemon=True).start()
+
+    def _save_snapshot_worker(self, arr):
+        import os
+        import numpy as np
+        import yaml
+        from datetime import datetime
+        try:
+            out = self.config.get("data", {}).get("output_dir", "./holography_data")
+            os.makedirs(out, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base = os.path.join(out, f"snapshot_{stamp}")
+            np.save(base + ".npy", arr)                       # raw 16-bit for analysis
+
+            # 8-bit PNG preview for quick viewing / sharing
+            try:
+                from PIL import Image
+                a = arr.astype(float)
+                mn, mx = a.min(), a.max()
+                disp = (((a - mn) / (mx - mn)) * 255).astype(np.uint8) \
+                    if mx > mn else np.zeros_like(a, np.uint8)
+                Image.fromarray(disp, mode="L").save(base + ".png")
+            except Exception:
+                pass
+
+            # metadata: conditions + a fringe-quality / saturation read
+            meta = {"timestamp": datetime.now().isoformat(),
+                    "max_value": int(arr.max()), "mean": float(arr.mean())}
+            try:
+                from fringe_detection import (calculate_sideband_energy,
+                                              check_saturation)
+                meta["sideband_metric"] = float(calculate_sideband_energy(arr))
+                sat = check_saturation(arr)
+                meta["saturated"] = bool(sat["saturated"])
+                meta["fill_fraction"] = float(sat["fill_fraction"])
+            except Exception:
+                pass
+            for key, var in (("target_wavelength_nm", "_laser_wl_target"),
+                             ("exposure_us", "_cam_exp_target")):
+                try:
+                    meta[key] = float(getattr(self, var).get())
+                except Exception:
+                    pass
+            with open(base + ".yaml", "w") as f:
+                yaml.dump(meta, f)
+
+            sb = meta.get("sideband_metric")
+            tail = f"  (sideband={sb:.0f})" if sb is not None else ""
+            self.msg_queue.put({"type": "log",
+                                "text": f"📷 Saved {os.path.basename(base)}.npy "
+                                        f"(+png +yaml){tail}", "level": "OK"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Snapshot save failed: {e}", "level": "WARN"})
 
     # ── Laser tab ─────────────────────────────────────────────────────────────
 
