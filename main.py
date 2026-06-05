@@ -317,6 +317,24 @@ class HolographyApp:
                       foreground=MUTED).pack(anchor="w")
             ttk.Label(cell, textvariable=var, font=self._font_metric).pack(anchor="w")
 
+        # Exposure control (live) — raise to brighten / drive saturation,
+        # lower to avoid clipping. The configured value is applied at connect.
+        expf = ttk.Frame(tab)
+        expf.pack(fill="x", pady=(2, 6))
+        ttk.Label(expf, text="Exposure", foreground=MUTED).pack(side="left", padx=(0, 6))
+        self._cam_exp_target = tk.DoubleVar(
+            value=float(self.config.get("hardware", {})
+                        .get("camera", {}).get("exposure_time", 500)))
+        sp_exp = ttk.Spinbox(expf, from_=1, to=262143, increment=100,
+                             textvariable=self._cam_exp_target, width=10, format="%.0f")
+        sp_exp.pack(side="left", padx=2)
+        sp_exp.bind("<Return>", lambda _e: self._set_exposure())
+        ttk.Label(expf, text="µs", foreground=MUTED).pack(side="left", padx=(2, 6))
+        ttk.Button(expf, text="Set", style="Accent.TButton",
+                   command=self._set_exposure).pack(side="left", padx=2)
+        ttk.Label(expf, text="↑ brighten / saturate   ↓ avoid clipping",
+                  foreground=MUTED, font=self._font_small).pack(side="left", padx=(10, 0))
+
         # Camera preview
         ttk.Label(tab, text="Camera Preview",
                   font=self._font_section).pack(anchor="w", pady=(2, 6))
@@ -331,6 +349,26 @@ class HolographyApp:
         self._canvas.bind("<Configure>", lambda _e: self._redraw_frame())
         self._canvas.create_text(220, 120, text="No signal",
                                  fill=MUTED, font=self._font_metric, tags="nosignal")
+
+    def _set_exposure(self):
+        if not self.camera:
+            self._log("Camera not connected.", "WARN")
+            return
+        us = float(self._cam_exp_target.get())
+        self._log(f"Camera exposure → {us:.0f} µs", "INFO")
+        self._mark_user_action()
+        threading.Thread(target=self._set_exposure_worker,
+                         args=(us,), daemon=True).start()
+
+    def _set_exposure_worker(self, us):
+        try:
+            actual = self.camera.setExposure(us)
+            self.msg_queue.put({"type": "log",
+                                "text": f"  Exposure now {actual:.0f} µs",
+                                "level": "OK"})
+        except Exception as e:
+            self.msg_queue.put({"type": "log",
+                                "text": f"Set exposure failed: {e}", "level": "WARN"})
 
     # ── Laser tab ─────────────────────────────────────────────────────────────
 
@@ -645,7 +683,12 @@ class HolographyApp:
         warning if the SDK keeps returning no frames (so the user can
         see the difference between 'no light' and 'no frames at all')."""
         import numpy as np
+        from fringe_detection import check_saturation
+        val = self.config.get("experiment", {}).get("validation", {})
+        sat_level    = float(val.get("saturation_level", 65535))
+        sat_frac_max = float(val.get("max_saturated_fraction", 0.001))
         null_streak = 0
+        was_saturated = False   # log only on transition, so we don't spam
         while not self._stop_background.is_set():
             cam = self.camera
             if cam is not None and not self.experiment_running:
@@ -664,16 +707,38 @@ class HolographyApp:
                                 "level": "DEBUG",
                             })
                             self._cam_first_frame_logged = True
+                        # Live saturation warning — lets you back off exposure /
+                        # power while aligning, before clipping ruins a run.
+                        sat = check_saturation(frame, sat_level=sat_level,
+                                               sat_fraction_max=sat_frac_max)
+                        if sat["saturated"] and not was_saturated:
+                            self.msg_queue.put({
+                                "type": "log",
+                                "text": (f"⚠ Camera SATURATING — "
+                                         f"{sat['fraction']*100:.2f}% of pixels "
+                                         f"clipped (max {sat['max_value']}/"
+                                         f"{int(sat_level)}). Reduce exposure or "
+                                         f"laser power; clipped fringes = invalid "
+                                         f"holograms."),
+                                "level": "WARN"})
+                        elif was_saturated and not sat["saturated"]:
+                            self.msg_queue.put({
+                                "type": "log",
+                                "text": "✓ Saturation cleared.", "level": "OK"})
+                        was_saturated = sat["saturated"]
                         self.msg_queue.put({"type": "frame", "data": frame})
                     else:
                         null_streak += 1
-                        if null_streak == 30 and not self._cam_first_frame_logged:
+                        if null_streak == 5 and not self._cam_first_frame_logged:
                             self.msg_queue.put({
                                 "type": "log",
-                                "text": ("Camera getFrame keeps returning no frame. "
-                                         "Likely causes: framegrabber disabled (URL "
-                                         "had ?fg=none) or the SDK picked the Virtual "
-                                         "camera."),
+                                "text": ("Camera connected but no frames are "
+                                         "arriving. Almost always: (1) Windows "
+                                         "Firewall is blocking inbound GigE "
+                                         "stream packets for this Python — run "
+                                         "tools/setup_lab_machine.ps1 as admin; "
+                                         "or (2) Xeneth is open and holding the "
+                                         "camera — close it. NOT a light issue."),
                                 "level": "WARN",
                             })
                             self._cam_first_frame_logged = True
@@ -980,6 +1045,13 @@ class HolographyApp:
         self._log_widget.insert("end", f"[{ts}] {text}\n", level)
         self._log_widget.see("end")
         self._log_widget.configure(state="disabled")
+        # Mirror every Activity message into the session logfile (with level),
+        # so there's a full on-disk record to read back if things go sideways.
+        if LOG_FILE is not None:
+            try:
+                LOG_FILE.write(f"[{ts}] [{level:5}] {text}\n")
+            except Exception:
+                pass
 
     def _clear_log(self):
         self._log_widget.configure(state="normal")
@@ -1015,12 +1087,18 @@ class HolographyApp:
                     raw = str(msg["value"])
                     try:
                         v = float(raw)
-                        # 8168E reports :POW? as watts (e.g. "2.08e-04"); some
-                        # configurations return dBm or µW directly.
-                        if "e" in raw.lower() or abs(v) < 0.1:
-                            uw = v * 1e6                  # watts
-                        elif abs(v) < 50:
-                            uw = 10 ** (v / 10) * 1000    # dBm
+                        # The 8168 may report :POW? in dBm, watts, or µW
+                        # depending on its unit setting. Infer from SIGN and
+                        # MAGNITUDE, not text format — µW/watts are always
+                        # positive, so anything negative is dBm. (The old
+                        # "'e' in string => watts" check turned a dBm value
+                        # like "-3.01E0" into -3,010,300.)
+                        if v < 0:
+                            uw = 10 ** (v / 10) * 1000    # negative => dBm
+                        elif abs(v) < 1e-2:
+                            uw = v * 1e6                  # tiny +ve => watts
+                        elif v < 10:
+                            uw = 10 ** (v / 10) * 1000    # small +ve => dBm (e.g. +2 dBm)
                         else:
                             uw = v                        # already µW
                         self._laser_pw_cur.set(f"{uw:.0f}")
@@ -1181,12 +1259,27 @@ class HolographyApp:
         self._emit(f"Camera — trying {url}…")
         try:
             from XenicsCam import xCam
-            self.camera = xCam(url=url)
+            exposure = cfg_c.get("exposure_time", None)
+            self.camera = xCam(url=url, exposure=exposure)
             ser = int(self.camera.ser) if self.camera.ser else "?"
             self._hw("camera", "connected")
             self._emit(f"✓ Camera  Xenics Bobcat 320 GigE  SER:{ser}", "OK")
+            no_frames = False
             for line in getattr(self.camera, "init_log", []):
-                self._emit(f"  {line}", "DEBUG")
+                # Escalate the self-diagnostics so a dead stream is obvious,
+                # not buried in DEBUG. "Connected but no frames" is the trap
+                # that cost days — make it a loud, actionable warning.
+                if "NO FRAMES" in line:
+                    no_frames = True
+                    self._emit(f"  ⚠ {line}", "WARN")
+                elif line.startswith("Streaming OK"):
+                    self._emit(f"  {line}", "OK")
+                else:
+                    self._emit(f"  {line}", "DEBUG")
+            if no_frames:
+                # Control channel is up but the image stream isn't — flag the
+                # tile so nobody mistakes the green dot for "working".
+                self._hw("camera", "error")
             record_ok("Camera")
         except Exception as e:
             self._hw("camera", "error")
@@ -1203,6 +1296,19 @@ class HolographyApp:
             self.switch = D700DiconSwitch(port=port, baudrate=cfg_s.get("baudrate", 9600))
             self._hw("switch", "connected")
             self._emit(f"✓ Switch  Dicon GP700  {port}", "OK")
+            # Confirm the device actually talks back (port opening proves
+            # nothing). An empty ID = serial opened but the switch is mute.
+            try:
+                ident = self.switch.identify() if hasattr(self.switch, "identify") else ""
+                if ident:
+                    self._emit(f"  Switch ID: {ident}", "OK")
+                else:
+                    self._emit("  ⚠ Switch gave no ID — port opened but the "
+                               "device isn't answering (check power/baud). Leg "
+                               "commands are sent open-loop and can't be verified.",
+                               "WARN")
+            except Exception as e:
+                self._emit(f"  Switch ID query failed: {e}", "DEBUG")
             record_ok("Switch")
         except Exception as e:
             self._hw("switch", "error")
@@ -1347,9 +1453,13 @@ class HolographyApp:
         import numpy as np
         import yaml
         from fringe_detection import (check_fringes_visible,
-                                       optimize_polarization_for_fringes)
+                                       optimize_polarization_for_fringes,
+                                       check_saturation)
 
         cfg    = self.config
+        val    = cfg.get("experiment", {}).get("validation", {})
+        sat_level    = float(val.get("saturation_level", 65535))
+        sat_frac_max = float(val.get("max_saturated_fraction", 0.001))
         legs   = cfg["experiment"]["legs"]
         wls    = cfg["experiment"]["wavelengths"]
         waits  = cfg["experiment"]["wait_times"]
@@ -1446,6 +1556,20 @@ class HolographyApp:
                         "text": "  ✗ Frame capture failed — skipping", "level": "WARN"})
 
                 if frame is not None:
+                    # Saturation/clipping check — a clipped fringe is no longer
+                    # a clean sinusoid, so its FFT sideband (and the recovered
+                    # amplitude/phase) are corrupted. Flag it; still save so the
+                    # raw data isn't lost, but mark it invalid in metadata.
+                    sat = check_saturation(frame, sat_level=sat_level,
+                                           sat_fraction_max=sat_frac_max)
+                    if sat["saturated"]:
+                        cb({"type": "log",
+                            "text": (f"  ⚠ SATURATED — {sat['fraction']*100:.2f}% "
+                                     f"of pixels clipped (max {sat['max_value']}/"
+                                     f"{int(sat_level)}). Data INVALID — reduce "
+                                     f"exposure or laser power."),
+                            "level": "WARN"})
+
                     fname = fmt.format(leg=leg, wavelength=wl)
                     fpath = out / fname
                     np.save(fpath, frame)
@@ -1457,11 +1581,17 @@ class HolographyApp:
                             angles = [0, 0, 0]
                         meta = {"leg": leg, "wavelength_nm": wl,
                                 "timestamp": datetime.now().isoformat(),
-                                "motor_angles": angles}
+                                "motor_angles": angles,
+                                "saturated": bool(sat["saturated"]),
+                                "saturated_fraction": float(sat["fraction"]),
+                                "max_value": int(sat["max_value"]),
+                                "fill_fraction": float(sat["fill_fraction"])}
                         with open(fpath.with_suffix(".yaml"), "w") as f:
                             yaml.dump(meta, f)
 
-                    cb({"type": "log", "text": f"  💾 {fname}", "level": "OK"})
+                    tag = "WARN" if sat["saturated"] else "OK"
+                    flag = "  ⚠ invalid(saturated)" if sat["saturated"] else ""
+                    cb({"type": "log", "text": f"  💾 {fname}{flag}", "level": tag})
 
                 cb({"type": "progress",
                     "percent": n / total * 100,
@@ -1647,7 +1777,36 @@ class HolographyApp:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+# Shared logfile handle. Everything goes here: the GUI Activity messages (via
+# _log) AND the driver/optimizer print() spam (via stdout redirect), so there's
+# one readable record of a session even if it crashes. Lives next to main.py.
+LOG_FILE = None
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session.log")
+
+
+def _setup_logfile():
+    """Open the session logfile and route stdout into it. Windows Terminal
+    chokes on the volume + unicode (µ, °, ✓), and a file means the full log
+    survives a crash. Real errors still hit stderr/terminal. The GUI Activity
+    panel is unaffected (it has its own queue) — _log mirrors into this file."""
+    global LOG_FILE
+    import sys
+    import datetime
+    try:
+        LOG_FILE = open(LOG_PATH, "a", buffering=1, encoding="utf-8")
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        LOG_FILE.write(f"\n===== session {stamp} =====\n")
+        sys.stdout = LOG_FILE          # capture driver/optimizer print() too
+        sys.__stderr__.write(f"[logging everything to {LOG_PATH}]\n")
+    except Exception as e:
+        try:
+            sys.__stderr__.write(f"(logfile setup failed: {e})\n")
+        except Exception:
+            pass
+
+
 def main():
+    _setup_logfile()
     root = tk.Tk()
     HolographyApp(root)
     root.mainloop()
