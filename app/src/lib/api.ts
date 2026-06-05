@@ -1,7 +1,16 @@
-// Talk to the Python backend over HTTP, so the UI works in any browser (e.g.
-// over Tailscale to a headless NUC). The FastAPI server exposes POST /rpc with
-// the same {method, params} -> {ok, result} contract the old Tauri bridge used.
+import { isTauri } from "./platform";
+
+// One frontend, two transports:
+//  • Tauri desktop app  → native IPC bridge (Rust spawns the Python sidecar).
+//    This is the "real app" the PI wants — no server, no browser.
+//  • Plain browser      → HTTP POST /rpc to the FastAPI server (headless NUC
+//    over Tailscale).
+// Both honor the same {method, params} -> result contract.
 export async function rpc<T = any>(method: string, params: Record<string, any> = {}): Promise<T> {
+  if (isTauri) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<T>("sidecar_rpc", { method, params });
+  }
   let data: any;
   try {
     const res = await fetch("/rpc", {

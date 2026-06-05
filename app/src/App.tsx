@@ -187,15 +187,18 @@ export default function App() {
             <h1 className="text-[22px] font-bold tracking-[-0.022em] text-ink">
               {pageTitle}
             </h1>
-            <button
-              type="button"
-              onClick={toggle}
-              title={theme === "dark" ? "Light mode" : "Dark mode"}
-              aria-label="Toggle theme"
-              className="grid place-items-center w-8 h-8 rounded-md text-soft hover:text-ink hover:bg-panel transition-colors"
-            >
-              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
+            {/* In the desktop app the titlebar already has a theme toggle. */}
+            {!isTauri && (
+              <button
+                type="button"
+                onClick={toggle}
+                title={theme === "dark" ? "Light mode" : "Dark mode"}
+                aria-label="Toggle theme"
+                className="grid place-items-center w-8 h-8 rounded-md text-soft hover:text-ink hover:bg-panel transition-colors"
+              >
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+            )}
           </div>
 
           <OpticalPath
