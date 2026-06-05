@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -15,6 +15,24 @@ export function LaserTab({
 }) {
   const [wlTarget, setWlTarget] = useState("1550");
   const [pwTarget, setPwTarget] = useState("208");
+
+  // Seed the target fields from the laser's ACTUAL current values once it
+  // reads back, instead of leaving them at the placeholder defaults. After
+  // that, the user's edits stick.
+  const wlInit = useRef(false);
+  const pwInit = useRef(false);
+  useEffect(() => {
+    if (!wlInit.current && state.wavelength_nm != null) {
+      setWlTarget(state.wavelength_nm.toFixed(2));
+      wlInit.current = true;
+    }
+  }, [state.wavelength_nm]);
+  useEffect(() => {
+    if (!pwInit.current && state.power_uw != null) {
+      setPwTarget(Math.round(state.power_uw).toString());
+      pwInit.current = true;
+    }
+  }, [state.power_uw]);
 
   const setWl = async () => {
     const v = parseFloat(wlTarget);

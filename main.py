@@ -459,6 +459,7 @@ class HolographyApp:
         ttk.Label(wl, text="nm", foreground=MUTED).pack(side="left", padx=(0, 16))
         ttk.Label(wl, text="Target", foreground=MUTED).pack(side="left", padx=(0, 6))
         self._laser_wl_target = tk.DoubleVar(value=1550.0)
+        self._laser_wl_target_init = False   # seed from real readback on first poll
         sp = ttk.Spinbox(wl, from_=1475, to=1575, increment=1.0,
                         textvariable=self._laser_wl_target, width=10, format="%.2f")
         sp.pack(side="left", padx=2)
@@ -476,6 +477,7 @@ class HolographyApp:
         ttk.Label(pw, text="µW", foreground=MUTED).pack(side="left", padx=(0, 16))
         ttk.Label(pw, text="Target", foreground=MUTED).pack(side="left", padx=(0, 6))
         self._laser_pw_target = tk.DoubleVar(value=208.0)
+        self._laser_pw_target_init = False   # seed from real readback on first poll
         sp2 = ttk.Spinbox(pw, from_=50, to=500, increment=10,
                           textvariable=self._laser_pw_target, width=10, format="%.0f")
         sp2.pack(side="left", padx=2)
@@ -1151,6 +1153,11 @@ class HolographyApp:
                     v = msg["value"]
                     if isinstance(v, (int, float)):
                         self._laser_wl_cur.set(f"{v:.2f}")
+                        # Seed the target box from the laser's actual value the
+                        # first time we read it (not the placeholder default).
+                        if not self._laser_wl_target_init:
+                            self._laser_wl_target.set(round(float(v), 2))
+                            self._laser_wl_target_init = True
                 elif t == "laser_pw":
                     raw = str(msg["value"])
                     try:
@@ -1170,6 +1177,9 @@ class HolographyApp:
                         else:
                             uw = v                        # already µW
                         self._laser_pw_cur.set(f"{uw:.0f}")
+                        if not self._laser_pw_target_init:
+                            self._laser_pw_target.set(round(uw))
+                            self._laser_pw_target_init = True
                     except (TypeError, ValueError):
                         pass
                 elif t == "laser_out":
