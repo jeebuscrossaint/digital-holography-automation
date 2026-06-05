@@ -16,7 +16,16 @@ from datetime import datetime
 
 # ── Environment setup (must happen before any hardware imports) ──────────────
 
-SCRIPT_DIR = Path(__file__).parent
+_FROZEN = getattr(sys, "frozen", False)
+if _FROZEN:
+    # PyInstaller one-file build: bundled code/resources live under _MEIPASS,
+    # but editable data (config, logs, holograms) must live NEXT TO the .exe.
+    SCRIPT_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    DATA_DIR = Path(sys.executable).parent
+    os.chdir(DATA_DIR)               # so "./holography_data" etc. land by the exe
+else:
+    SCRIPT_DIR = Path(__file__).parent
+    DATA_DIR = SCRIPT_DIR
 
 # Add Xeneth DLL to Windows DLL search path
 _XENETH_RUNTIME = r"C:\Program Files\Common Files\XenICs\Runtime"
@@ -32,7 +41,16 @@ for p in (str(SCRIPT_DIR / "hardware"), str(SCRIPT_DIR / "lib")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-CONFIG_FILE = str(SCRIPT_DIR / "experiment_config.yaml")
+CONFIG_FILE = str(DATA_DIR / "experiment_config.yaml")
+# On a frozen build's first run, seed the editable config from the bundled default.
+if _FROZEN and not os.path.exists(CONFIG_FILE):
+    import shutil
+    _default_cfg = SCRIPT_DIR / "experiment_config.yaml"
+    if _default_cfg.exists():
+        try:
+            shutil.copy(str(_default_cfg), CONFIG_FILE)
+        except Exception:
+            pass
 
 # ── Windows 11 Fluent colors (used for status indicators + log) ──────────────
 # Theme itself (backgrounds, buttons, tabs, etc.) comes from sv-ttk.
@@ -1859,7 +1877,7 @@ class HolographyApp:
 # _log) AND the driver/optimizer print() spam (via stdout redirect), so there's
 # one readable record of a session even if it crashes. Lives next to main.py.
 LOG_FILE = None
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session.log")
+LOG_PATH = str(DATA_DIR / "session.log")   # next to the exe (frozen) or repo root (dev)
 
 
 def _setup_logfile():
