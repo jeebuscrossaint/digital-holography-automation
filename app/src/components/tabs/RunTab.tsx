@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader, CardTitle, CardBody } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
-import { Play, Square, Camera, AlertTriangle } from "lucide-react";
+import { Play, Square, Camera, AlertTriangle, Maximize2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { api, ExperimentState } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +29,16 @@ export function RunTab({
   const [saturated, setSaturated] = useState(false);
   const [fill, setFill] = useState<number | null>(null);
   const wasSat = useRef(false);
+  const [expanded, setExpanded] = useState(false);
+  const [zoom, setZoom] = useState(1);
+
+  // Esc closes the expanded view
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setExpanded(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
 
   useEffect(() => {
     let alive = true;
@@ -173,6 +183,10 @@ export function RunTab({
             <Button variant="outline" disabled={!online} onClick={snapshot}>
               <Camera className="h-4 w-4" /> Save snapshot
             </Button>
+            <Button variant="outline" disabled={!frameSrc}
+                    onClick={() => { setZoom(1); setExpanded(true); }}>
+              <Maximize2 className="h-4 w-4" /> Expand
+            </Button>
             <div className="flex-1" />
             {fill != null && (
               <span className={cn(
@@ -188,18 +202,75 @@ export function RunTab({
               </span>
             )}
           </div>
-          <div className={cn(
-            "aspect-[4/3] w-full bg-[#0a0a0a] rounded border grid place-items-center overflow-hidden",
-            saturated ? "border-warn" : "border-border"
-          )}>
+          <div
+            className={cn(
+              "aspect-[4/3] w-full bg-[#0a0a0a] rounded border grid place-items-center overflow-hidden",
+              saturated ? "border-warn" : "border-border",
+              frameSrc && "cursor-zoom-in"
+            )}
+            onClick={() => frameSrc && (setZoom(1), setExpanded(true))}
+            title={frameSrc ? "Click to expand" : undefined}
+          >
             {frameSrc ? (
-              <img src={frameSrc} alt="frame" className="max-h-full max-w-full" />
+              <img src={frameSrc} alt="frame" className="max-h-full max-w-full"
+                   style={{ imageRendering: "pixelated" }} />
             ) : (
               <span className="text-faint text-sm">no signal</span>
             )}
           </div>
         </CardBody>
       </Card>
+
+      {/* Fullscreen camera view for close inspection (Esc or click ✕ to exit) */}
+      {expanded && (
+        <div
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+          onClick={() => setExpanded(false)}
+        >
+          <div className="flex items-center gap-3 p-3 text-soft"
+               onClick={(e) => e.stopPropagation()}>
+            <span className="text-sm font-medium">Camera — live</span>
+            {fill != null && (
+              <span className={cn("text-xs tabular-nums", saturated ? "text-warn" : "text-faint")}>
+                fill {(fill * 100).toFixed(0)}%
+              </span>
+            )}
+            {saturated && (
+              <span className="flex items-center gap-1 text-xs text-warn font-medium">
+                <AlertTriangle className="h-3.5 w-3.5" /> SATURATING
+              </span>
+            )}
+            <div className="flex-1" />
+            <Button variant="outline" size="icon"
+                    onClick={() => setZoom((z) => Math.max(1, z - 0.5))}>
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <span className="text-xs tabular-nums w-12 text-center">{zoom.toFixed(1)}×</span>
+            <Button variant="outline" size="icon"
+                    onClick={() => setZoom((z) => Math.min(8, z + 0.5))}>
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => setExpanded(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto grid place-items-center p-4"
+               onClick={(e) => e.stopPropagation()}>
+            {frameSrc && (
+              <img
+                src={frameSrc}
+                alt="camera"
+                style={{
+                  imageRendering: "pixelated",
+                  transform: `scale(${zoom})`,
+                  transformOrigin: "center",
+                  maxHeight: "100%", maxWidth: "100%",
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
