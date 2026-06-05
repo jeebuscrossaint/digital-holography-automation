@@ -31,7 +31,7 @@ def main():
         "scipy.signal", "scipy.ndimage", "matplotlib", "PIL", "PIL.Image",
         "pyvisa", "pyvisa_py", "gpib_ctypes", "serial", "serial.tools.list_ports",
         # repo-root modules main.py imports lazily
-        "fringe_detection", "data_processing", "data_collection",
+        "fringe_detection", "data_processing",
         # hardware drivers (also bundled as data + reachable via runtime sys.path)
         "XenicsCam", "HPTunableLaserSource", "D700DiconSwitch", "polMotors",
         "MMF", "calebsUsefulFunctions", "usefulFunctions",

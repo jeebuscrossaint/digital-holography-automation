@@ -67,8 +67,7 @@ the camera firewall rule — see **[LAB_SETUP.md](LAB_SETUP.md)**.
 ## Repository layout
 
 ```
-main.py                tkinter GUI — the app
-data_collection.py     acquisition loop (sweep legs × wavelengths)
+main.py                tkinter GUI — the app (acquisition + processing)
 data_processing.py     hologram reconstruction + LP-mode decomposition
 fringe_detection.py    fringe metric + polarization auto-optimizer
 hardware/              instrument drivers (laser, camera, switch, motors)
