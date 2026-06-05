@@ -53,11 +53,65 @@ class HPTunableLaserSource:
         self.TL.read_termination = '\n'
         self.TL.write_termination = '\n'
 
+        # The HP 8168 silently rejects unrecognized/invalid commands — the
+        # only sign is an entry in its error queue. Clear stale errors from
+        # any prior session so checkError() reflects only what we send.
+        self.last_error = None
+        try:
+            self.TL.write("*CLS")
+        except Exception:
+            pass
+
+    # --- error checking (the 8168 fails writes silently) ---
+
+    def checkError(self):
+        """Drain and return the instrument error queue (:SYST:ERR?).
+
+        Returns a list of error strings. A clean queue is ['+0,"No error"'].
+        Use this after a suspicious operation — the 8168 won't raise, it just
+        queues the error and moves on."""
+        errors = []
+        old = self.TL.timeout
+        self.TL.timeout = 2000
+        try:
+            for _ in range(20):
+                resp = self.TL.query(":SYST:ERR?").strip()
+                errors.append(resp)
+                if resp.split(",")[0].strip() in ("0", "+0"):
+                    break
+        except Exception:
+            pass
+        finally:
+            self.TL.timeout = old
+        return errors
+
+    def _safe_write(self, cmd, check=True):
+        """Write a command and (optionally) confirm the 8168 accepted it via
+        the error queue. Records the first rejection to self.last_error and
+        returns True if accepted. Does NOT raise, so a bad command mid-sweep
+        won't abort the run — callers check the return / self.last_error."""
+        self.TL.write(cmd)
+        if not check:
+            return True
+        old = self.TL.timeout
+        self.TL.timeout = 2000
+        try:
+            err = self.TL.query(":SYST:ERR?").strip()
+        except Exception:
+            self.TL.timeout = old
+            return True  # can't verify; assume OK rather than block
+        self.TL.timeout = old
+        if err.split(",")[0].strip() not in ("0", "+0"):
+            self.last_error = f"{cmd!r} rejected by laser: {err}"
+            print(f"[laser] {self.last_error}")
+            return False
+        return True
+
     # --- output ---
 
     def outputState(self, tf):
         # 8168E listens to the short :OUTP:STAT form, not :SOUR:POW:STAT
-        self.TL.write(":OUTP:STAT 1" if tf else ":OUTP:STAT 0")
+        self._safe_write(":OUTP:STAT 1" if tf else ":OUTP:STAT 0")
 
     def isOutputOn(self):
         return self.TL.query(":OUTP:STAT?").strip()
@@ -69,15 +123,21 @@ class HPTunableLaserSource:
         Use unit 'UW' (microwatts), 'DBM', 'NW', 'MW', 'W', etc. The
         short :POW form is what the HP 8168E actually responds to."""
         if unit:
-            self.TL.write(f":POW {num}{unit}")
+            self._safe_write(f":POW {num}{unit}")
         else:
-            self.TL.write(f":POW {num}")
+            self._safe_write(f":POW {num}")
 
     def checkPowerAmplitude(self, string=''):
         return self.TL.query(f":POW? {string}").strip()
 
     def changePowerUnit(self, string):
-        self.TL.write(f":POW:UNIT {string}")
+        """8168 :POW:UNIT takes a numeric code (0=dBm, 1=Watt), NOT a unit
+        string like 'UW' — that returns -141 'Invalid character data'. Map
+        common names to the code. Actual power values are still set with an
+        inline suffix (e.g. ':POW 208UW'), which the instrument does accept."""
+        s = str(string).strip().upper()
+        code = 0 if s in ("DBM", "DB") else 1   # everything watt-based -> 1
+        self._safe_write(f":POW:UNIT {code}")
 
     def checkPowerUnit(self):
         return self.TL.query(":POW:UNIT?").strip()
@@ -89,9 +149,9 @@ class HPTunableLaserSource:
         if isinstance(nm, (int, float)):
             if not (_WL_MIN <= nm <= _WL_MAX):
                 raise ValueError(f"Wavelength {nm} nm out of range [{_WL_MIN}, {_WL_MAX}]")
-            self.TL.write(f":WAVE {nm:.4f}NM")
+            self._safe_write(f":WAVE {nm:.4f}NM")
         else:
-            self.TL.write(f":WAVE {nm}")
+            self._safe_write(f":WAVE {nm}")
 
     def checkWavelength(self, string=''):
         """Return current wavelength in nm. The 8168E reports in meters
