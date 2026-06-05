@@ -9,6 +9,25 @@ GigE cameras are great for high bandwidth but require network configuration.
 
 ---
 
+> ## ⚠️ READ THIS FIRST (updated 2026-06-04)
+>
+> **#1 cause of "camera connects but no image" is the Windows Firewall, not
+> the network.** GigE Vision streams frames as inbound UDP, which Windows
+> blocks per-executable. Xeneth is whitelisted; our Python is not. Run
+> `tools\setup_lab_machine.ps1` (admin) once — see **LAB_SETUP.md → Camera
+> firewall rule**. If the app says "Online" but the preview is dead, it's
+> almost always this (or Xeneth being open and holding the camera).
+>
+> **The static-IP `192.168.1.x` setup described below is NOT what this rig
+> uses.** In practice the camera and adapter run on **link-local
+> (APIPA) `169.254.x.x`** addresses, auto-assigned with no static config —
+> e.g. the camera reports `169.254.x.x / 255.255.0.0`. That works fine; you
+> do not need to set static IPs. Treat the `192.168.1.x` steps below as one
+> *option*, not a requirement, and substitute the actual `169.254.x.x`
+> address Xeneth shows under *GigE Vision Transport Layer → Current IP*.
+
+---
+
 ## Initial Setup (Do This Once)
 
 ### 0. Fix Xeneth SDK DLL Issue (If Camera Not Detected)

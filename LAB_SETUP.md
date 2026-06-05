@@ -45,9 +45,50 @@ that needs the Xenics filter driver and Xeneth runtime.
   3. Plug in the camera (or the Ethernet-to-USB adapter)
   4. Open Xeneth (the GUI) once to confirm the camera shows up
 
+### 3. Camera firewall rule — *required, or the camera "connects" but shows no image*
+
+⚠️ **This is the single most important step, and the easiest to miss.**
+
+The Bobcat 320 streams images as **inbound UDP** (GigE Vision / GVSP).
+Windows Firewall blocks inbound UDP **per-executable**. The Xeneth
+installer whitelists `Xeneth64.exe` — so the Xeneth GUI streams fine — but
+**our Python is a different executable and is not whitelisted**, so its
+frames get silently dropped. The app then says *"Camera Online"* (the
+control channel works) while the preview stays dead / **"No signal."**
+It is **not** a light, exposure, calibration, or driver problem.
+
+Fix (run once per machine — it self-elevates to admin and is safe to
+re-run):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\setup_lab_machine.ps1
+```
+
+This adds the inbound rule for the venv Python (tkinter app + Tauri dev)
+and, if a release build is present, for the bundled sidecar `.exe`.
+
+> If the camera *still* shows "No signal": make sure **Xeneth is fully
+> closed** (only one program can hold the single GigE stream channel at a
+> time), and confirm the camera shows a live image in Xeneth first.
+
 ---
 
 ## Running
+
+### The tkinter app — what the lab uses today (recommended)
+
+The current working app is the tkinter GUI (`main.py`). It needs the venv
+(via `uv`) but no Node/Rust toolchain:
+
+```sh
+git clone <repo-url>
+cd digital-holography-automation
+# one time: install uv + the two SDKs above + run the firewall script
+.\start.bat        # = uv run python main.py
+```
+
+Hit **Connect All**, then **Start Experiment**. The Tauri app below is a
+work-in-progress rewrite and is not yet wired up — prefer `start.bat`.
 
 ### From source (development)
 
