@@ -1,0 +1,8 @@
+exposure_us: 1000.0
+fill_fraction: 0.5321126115815976
+max_value: 35284
+mean: 17693.30341796875
+saturated: false
+sideband_metric: 609.1855594986991
+target_wavelength_nm: 1550.0
+timestamp: '2026-06-04T20:42:25.091568'
