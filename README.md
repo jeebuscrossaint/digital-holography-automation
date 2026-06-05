@@ -82,9 +82,15 @@ docs/                  setup guides (GigE camera, Xeneth SDK)
 
 - Camera streaming, laser, motors, acquisition, the fringe auto-optimizer, and
   saturation rejection all work.
-- Reconstruction reaches **~92% fidelity**; closing the gap to the paper's ~98%
-  needs the exact imaging scale (µm/pixel) and a sub-pixel (Fourier
-  fine-binning) centering pass.
+- Reconstruction reaches **~92% fidelity**. Pixel scale, mode-field diameter,
+  field position, and the defocus quadratic-phase are *optimized numerically*
+  (matching the paper — they are not measured on the bench). The gap to the
+  paper's ~98% is the twin-image centering: the paper uses sub-pixel **Fourier
+  Fine-Binning** (`lib/calebsUsefulFunctions.py: fourier_interp_2d`, not yet
+  wired into `_recover_field`, which currently uses `center_of_mass`), with
+  centroids averaged across all ports per wavelength and a linear fit vs λ.
+  Replicating that needs a full multi-port × wavelength dataset — i.e. the new
+  fiber switch.
 - The DiCon GP700 switch is being replaced — its driver may need updating for
   the new unit.
 
