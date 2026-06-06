@@ -119,7 +119,9 @@ class HolographyDataCollector:
         print("\n[4/4] Connecting to Polarization Motors...")
         try:
             serial_num = self.config['hardware']['polarization_motors']['serial_number']
-            self.motors = polMotors(serialNumber=serial_num.encode())
+            # str() first: YAML reads the serial as an int, and int has no
+            # .encode() — the GUI path does the same (gui/connection.py).
+            self.motors = polMotors(serialNumber=str(serial_num).encode())
             
             # Home motors to initial positions
             initial_angles = self.config['hardware']['polarization_motors']['initial_angles']
