@@ -3,129 +3,116 @@
 
 import threading
 import time
-import tkinter as tk
-from tkinter import ttk
 
-from ..theme import MUTED
+from PySide6.QtWidgets import (
+    QDoubleSpinBox, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+    QVBoxLayout, QWidget,
+)
+
+from ..style import MUTED
 
 
 class PolarizationTabMixin:
     def _build_polarization_tab(self):
-        tab = ttk.Frame(self.notebook, padding=14)
-        self.notebook.add(tab, text="Polarization")
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+        lay.setContentsMargins(14, 14, 14, 14)
 
-        ttk.Label(tab, foreground=MUTED, font=self._font_small,
-                  text="Three motorized paddles squeeze the fiber to tune polarization. "
-                       "For holography you want signal and reference arms parallel — "
-                       "max fringes.").pack(anchor="w", pady=(0, 12))
+        intro = QLabel("Three motorized paddles squeeze the fiber to tune polarization. "
+                       "For holography you want signal and reference arms parallel — max fringes.")
+        intro.setObjectName("Small"); lay.addWidget(intro)
 
-        # Global jog size — applies to all three paddles
-        jog_row = ttk.Frame(tab)
-        jog_row.pack(fill="x", pady=(0, 10))
-        ttk.Label(jog_row, text="Jog size", font=self._font_body).pack(side="left")
-        self._jog_size_var = tk.DoubleVar(value=1.0)
-        ttk.Spinbox(jog_row, from_=0.1, to=10.0, increment=0.5,
-                    textvariable=self._jog_size_var,
-                    width=6, format="%.1f").pack(side="left", padx=(8, 2))
-        ttk.Label(jog_row, text="°", foreground=MUTED).pack(side="left")
+        jog = QHBoxLayout()
+        jog.addWidget(QLabel("Jog size"))
+        self._jog_size_spin = QDoubleSpinBox(); self._jog_size_spin.setRange(0.1, 10.0)
+        self._jog_size_spin.setSingleStep(0.5); self._jog_size_spin.setValue(1.0)
+        jog.addWidget(self._jog_size_spin); jog.addWidget(QLabel("°")); jog.addStretch(1)
+        lay.addLayout(jog)
 
-        self._paddle_cur_vars:    dict = {}
-        self._paddle_target_vars: dict = {}
-
-        big_font = (self._font_title[0], 30)
+        self._paddle_cur_lbls: dict = {}
+        self._paddle_target_spins: dict = {}
 
         for i in (1, 2, 3):
-            card = ttk.LabelFrame(tab, text=f"  Paddle {i}  ", padding=14)
-            card.pack(fill="x", pady=6)
+            card = QGroupBox(f"Paddle {i}"); ch = QHBoxLayout(card)
+            cur = QLabel("—"); cur.setObjectName("BigReadout")
+            self._paddle_cur_lbls[i] = cur
+            ch.addWidget(cur); ch.addSpacing(20)
 
-            # Left: big current-angle readout
-            cur_var = tk.StringVar(value="—")
-            self._paddle_cur_vars[i] = cur_var
-            ttk.Label(card, textvariable=cur_var, font=big_font,
-                      width=7, anchor="w").pack(side="left", padx=(0, 20))
+            right = QVBoxLayout()
+            top = QHBoxLayout()
+            top.addWidget(QLabel("Target"))
+            sp = QDoubleSpinBox(); sp.setRange(0, 160); sp.setDecimals(1); sp.setValue(0.0)
+            self._paddle_target_spins[i] = sp
+            sp.editingFinished.connect(lambda p=i: self._move_paddle(p))
+            top.addWidget(sp)
+            mv = QPushButton("Move To"); mv.setObjectName("Accent")
+            mv.clicked.connect(lambda _c=False, p=i: self._move_paddle(p))
+            home = QPushButton("Home")
+            home.clicked.connect(lambda _c=False, p=i: self._home_paddle(p))
+            top.addWidget(mv); top.addWidget(home); top.addStretch(1)
+            right.addLayout(top)
 
-            # Right: stacked control rows
-            right = ttk.Frame(card)
-            right.pack(side="left", fill="x", expand=True)
+            bot = QHBoxLayout()
+            jl = QPushButton("«  Jog"); jl.clicked.connect(lambda _c=False, p=i: self._jog_paddle(p, -1))
+            jr = QPushButton("Jog  »"); jr.clicked.connect(lambda _c=False, p=i: self._jog_paddle(p, +1))
+            bot.addWidget(jl); bot.addWidget(jr); bot.addStretch(1)
+            right.addLayout(bot)
 
-            top = ttk.Frame(right)
-            top.pack(fill="x")
-            ttk.Label(top, text="Target", foreground=MUTED).pack(side="left", padx=(0, 6))
-            target_var = tk.DoubleVar(value=0.0)
-            self._paddle_target_vars[i] = target_var
-            sp = ttk.Spinbox(top, from_=0, to=160, increment=1.0,
-                             textvariable=target_var, width=8, format="%.1f")
-            sp.pack(side="left", padx=2)
-            sp.bind("<Return>", lambda _e, p=i: self._move_paddle(p))
-            ttk.Button(top, text="Move To", style="Accent.TButton",
-                       command=lambda p=i: self._move_paddle(p)).pack(side="left", padx=(6, 4))
-            ttk.Button(top, text="Home",
-                       command=lambda p=i: self._home_paddle(p)).pack(side="left", padx=2)
+            ch.addLayout(right, 1)
+            lay.addWidget(card)
 
-            bot = ttk.Frame(right)
-            bot.pack(fill="x", pady=(8, 0))
-            ttk.Button(bot, text="«  Jog", width=10,
-                       command=lambda p=i: self._jog_paddle(p, -1)).pack(side="left", padx=(0, 4))
-            ttk.Button(bot, text="Jog  »", width=10,
-                       command=lambda p=i: self._jog_paddle(p, +1)).pack(side="left")
+        line = QFrame(); line.setFrameShape(QFrame.HLine); line.setStyleSheet(f"color:{MUTED}")
+        lay.addWidget(line)
 
-        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=(14, 10))
+        ctrl = QHBoxLayout()
+        home_all = QPushButton("Home all"); home_all.clicked.connect(self._home_all_paddles)
+        self._pol_optimize_btn = QPushButton("Auto-optimize for fringes")
+        self._pol_optimize_btn.setObjectName("Accent")
+        self._pol_optimize_btn.clicked.connect(self._auto_optimize_polarization)
+        ctrl.addWidget(home_all); ctrl.addWidget(self._pol_optimize_btn); ctrl.addStretch(1)
+        lay.addLayout(ctrl)
 
-        ctrl = ttk.Frame(tab)
-        ctrl.pack(fill="x")
-        ttk.Button(ctrl, text="Home all",
-                   command=self._home_all_paddles).pack(side="left")
-        self._pol_optimize_btn = ttk.Button(
-            ctrl, text="Auto-optimize for fringes",
-            style="Accent.TButton",
-            command=self._auto_optimize_polarization)
-        self._pol_optimize_btn.pack(side="left", padx=8)
+        self._pol_status_lbl = QLabel("Connect motors to enable controls.")
+        self._pol_status_lbl.setObjectName("Small")
+        lay.addWidget(self._pol_status_lbl)
+        lay.addStretch(1)
 
-        self._pol_status_var = tk.StringVar(value="Connect motors to enable controls.")
-        ttk.Label(tab, textvariable=self._pol_status_var,
-                  foreground=MUTED, font=self._font_small).pack(anchor="w", pady=(10, 0))
+        self.tabs.addTab(tab, "Polarization")
 
     def _sync_paddle_targets_from_hw(self):
-        """Set slider targets to whatever the motors currently report."""
-        if not self.motors or not hasattr(self, "_paddle_target_vars"):
+        """Set spin targets to whatever the motors currently report."""
+        if not self.motors or not hasattr(self, "_paddle_target_spins"):
             return
         for i in (1, 2, 3):
             try:
                 a = (self.motors.getPosition(i)
                      if hasattr(self.motors, "getPosition")
                      else self.motors.angles[i - 1])
-                self._paddle_target_vars[i].set(float(a))
+                self._paddle_target_spins[i].setValue(float(a))
             except Exception:
                 pass
-        self._pol_status_var.set("Ready.")
+        self._pol_status_lbl.setText("Ready.")
 
     def _move_paddle(self, paddle: int):
         if not self.motors:
-            self._pol_status_var.set("Motors not connected.")
+            self._pol_status_lbl.setText("Motors not connected.")
             return
-        target = float(self._paddle_target_vars[paddle].get())
-        target = max(0.0, min(160.0, target))
-        threading.Thread(target=self._move_paddle_worker,
-                         args=(paddle, target), daemon=True).start()
+        target = max(0.0, min(160.0, float(self._paddle_target_spins[paddle].value())))
+        threading.Thread(target=self._move_paddle_worker, args=(paddle, target), daemon=True).start()
 
     def _move_paddle_worker(self, paddle: int, target: float):
         try:
             self.motors.moveMotor(paddle, target)
-            self.msg_queue.put({"type": "log",
-                                "text": f"Paddle {paddle} → {target:.1f}°",
-                                "level": "INFO"})
+            self._post({"type": "log", "text": f"Paddle {paddle} → {target:.1f}°", "level": "INFO"})
         except Exception as e:
-            self.msg_queue.put({"type": "log",
-                                "text": f"Paddle {paddle} move failed: {e}",
-                                "level": "WARN"})
+            self._post({"type": "log", "text": f"Paddle {paddle} move failed: {e}", "level": "WARN"})
 
     def _home_paddle(self, paddle: int):
         if not self.motors:
-            self._pol_status_var.set("Motors not connected.")
+            self._pol_status_lbl.setText("Motors not connected.")
             return
-        self._paddle_target_vars[paddle].set(0.0)
-        threading.Thread(target=self._home_paddle_worker,
-                         args=(paddle,), daemon=True).start()
+        self._paddle_target_spins[paddle].setValue(0.0)
+        threading.Thread(target=self._home_paddle_worker, args=(paddle,), daemon=True).start()
 
     def _home_paddle_worker(self, paddle: int):
         try:
@@ -135,8 +122,8 @@ class PolarizationTabMixin:
                 self.motors.homeMotor(paddle)
             else:
                 self.motors.moveMotor(paddle, 0.0)
-            # Home is a calibration sweep, not a fast move — wait until the
-            # motor is no longer busy before sampling final position (cap 30s)
+            # Home is a calibration sweep, not a fast move — wait until the motor
+            # is no longer busy before sampling final position (cap 30s).
             time.sleep(0.5)
             deadline = time.time() + 30
             while time.time() < deadline and self.motors.isBusy():
@@ -145,56 +132,53 @@ class PolarizationTabMixin:
                       if hasattr(self.motors, "getPosition") else 0.0)
             ok = abs(actual) < 2.0
             extra = "" if start is None else f"  (from {start:.1f}°)"
-            self.msg_queue.put({
+            self._post({
                 "type": "log",
                 "text": f"Paddle {paddle} home → now {actual:.1f}°{extra}"
                         + ("" if ok else "  ⚠ didn't reach 0°"),
-                "level": "INFO" if ok else "WARN",
-            })
+                "level": "INFO" if ok else "WARN"})
         except Exception as e:
-            self.msg_queue.put({"type": "log",
-                                "text": f"Paddle {paddle} home failed: {e}",
-                                "level": "WARN"})
+            self._post({"type": "log", "text": f"Paddle {paddle} home failed: {e}", "level": "WARN"})
 
     def _jog_paddle(self, paddle: int, direction: int):
         if not self.motors:
-            self._pol_status_var.set("Motors not connected.")
+            self._pol_status_lbl.setText("Motors not connected.")
             return
         try:
-            step = float(self._jog_size_var.get())
-        except (tk.TclError, ValueError):
+            step = float(self._jog_size_spin.value())
+        except (ValueError, TypeError):
             step = 1.0
-        # Jog from the actual hardware position if available so repeated
-        # clicks compound on the real angle, not on a stale slider value
+        # Jog from the actual hardware position if available so repeated clicks
+        # compound on the real angle, not a stale spin value.
         try:
             cur = (self.motors.getPosition(paddle)
                    if hasattr(self.motors, "getPosition")
                    else self.motors.angles[paddle - 1])
         except Exception:
-            cur = float(self._paddle_target_vars[paddle].get())
+            cur = float(self._paddle_target_spins[paddle].value())
         new = max(0.0, min(160.0, cur + direction * step))
-        self._paddle_target_vars[paddle].set(new)
+        self._paddle_target_spins[paddle].setValue(new)
         self._move_paddle(paddle)
 
     def _home_all_paddles(self):
         if not self.motors:
-            self._pol_status_var.set("Motors not connected.")
+            self._pol_status_lbl.setText("Motors not connected.")
             return
         for i in (1, 2, 3):
             self._home_paddle(i)
 
     def _auto_optimize_polarization(self):
         if not self.motors:
-            self._pol_status_var.set("Motors not connected.")
+            self._pol_status_lbl.setText("Motors not connected.")
             return
         if not self.camera:
-            self._pol_status_var.set("Camera needed for fringe-based optimization.")
+            self._pol_status_lbl.setText("Camera needed for fringe-based optimization.")
             return
         if self.experiment_running:
-            self._pol_status_var.set("Stop the experiment first.")
+            self._pol_status_lbl.setText("Stop the experiment first.")
             return
-        self._pol_optimize_btn.configure(state="disabled")
-        self._pol_status_var.set("Sweeping paddles — this can take a minute…")
+        self._pol_optimize_btn.setEnabled(False)
+        self._pol_status_lbl.setText("Sweeping paddles — this can take a minute…")
         threading.Thread(target=self._auto_optimize_worker, daemon=True).start()
 
     def _auto_optimize_worker(self):
@@ -205,24 +189,17 @@ class PolarizationTabMixin:
                 self.camera, self.motors,
                 max_attempts=int(fd.get("max_attempts", 30)),
                 method=fd.get("check_method", "variance"),
-                threshold=float(fd.get("min_visibility", 0.15)),
-            )
-            tag = "OK" if success else "WARN"
+                threshold=float(fd.get("min_visibility", 0.15)))
             mark = "✓" if success else "⚠"
             msg = (f"{mark} Auto-optimize: paddles={[round(a, 1) for a in angles]}, "
                    f"metric={metric:.3f}"
-                   + ("" if success else
-                      f"  (below threshold {fd.get('min_visibility', 0.15)})"))
-            self.msg_queue.put({"type": "log", "text": msg, "level": tag})
-            self._pol_status_var.set(msg)
-            self._sync_paddle_targets_from_hw()
+                   + ("" if success else f"  (below threshold {fd.get('min_visibility', 0.15)})"))
+            self._post({"type": "log", "text": msg, "level": "OK" if success else "WARN"})
+            self._post({"type": "pol_status", "text": msg})
         except Exception as e:
             import traceback
-            self.msg_queue.put({"type": "log",
-                                "text": f"Auto-optimize failed: {e}",
-                                "level": "ERROR"})
-            self.msg_queue.put({"type": "log", "text": traceback.format_exc(),
-                                "level": "DEBUG"})
-            self._pol_status_var.set(f"Failed: {e}")
+            self._post({"type": "log", "text": f"Auto-optimize failed: {e}", "level": "ERROR"})
+            self._post({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
+            self._post({"type": "pol_status", "text": f"Failed: {e}"})
         finally:
-            self._pol_optimize_btn.configure(state="normal")
+            self._post({"type": "pol_optimize_done"})

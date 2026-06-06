@@ -3,37 +3,33 @@
 
 import os
 from pathlib import Path
-from tkinter import ttk
+
+from PySide6.QtWidgets import (
+    QHBoxLayout, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+)
 
 
 class ResultsTabMixin:
     def _build_results_tab(self):
-        tab = ttk.Frame(self.notebook, padding=14)
-        self.notebook.add(tab, text="Results")
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+        lay.setContentsMargins(14, 14, 14, 14)
 
-        btn_row = ttk.Frame(tab)
-        btn_row.pack(fill="x", pady=(0, 10))
-        ttk.Button(btn_row, text="Open data folder",
-                   command=self._open_data_folder).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="Refresh",
-                   command=self._refresh_results).pack(side="left")
+        btns = QHBoxLayout()
+        open_btn = QPushButton("Open data folder"); open_btn.clicked.connect(self._open_data_folder)
+        refresh = QPushButton("Refresh"); refresh.clicked.connect(self._refresh_results)
+        btns.addWidget(open_btn); btns.addWidget(refresh); btns.addStretch(1)
+        lay.addLayout(btns)
 
-        body = ttk.Frame(tab)
-        body.pack(fill="both", expand=True)
+        self._results_tree = QTreeWidget()
+        self._results_tree.setColumnCount(3)
+        self._results_tree.setHeaderLabels(["Hologram", "Fidelity", "Mode powers (LP01 → LP06)"])
+        self._results_tree.setColumnWidth(0, 240)
+        self._results_tree.setColumnWidth(1, 90)
+        self._results_tree.setColumnWidth(2, 400)
+        lay.addWidget(self._results_tree, 1)
 
-        cols = ("file", "fidelity", "mode_powers")
-        self._results_tree = ttk.Treeview(body, columns=cols, show="headings", height=24)
-        self._results_tree.heading("file",        text="Hologram")
-        self._results_tree.heading("fidelity",    text="Fidelity")
-        self._results_tree.heading("mode_powers", text="Mode powers (LP01 → LP06)")
-        self._results_tree.column("file",        width=240)
-        self._results_tree.column("fidelity",    width=90, anchor="e")
-        self._results_tree.column("mode_powers", width=400)
-
-        vsb = ttk.Scrollbar(body, orient="vertical", command=self._results_tree.yview)
-        self._results_tree.configure(yscrollcommand=vsb.set)
-        self._results_tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
+        self.tabs.addTab(tab, "Results")
 
     def _open_data_folder(self):
         d = Path(self.config.get("data", {}).get("output_dir", "./holography_data"))
@@ -45,7 +41,7 @@ class ResultsTabMixin:
 
     def _refresh_results(self):
         import yaml
-        self._results_tree.delete(*self._results_tree.get_children())
+        self._results_tree.clear()
         try:
             data_dir     = Path(self.config.get("data", {}).get("output_dir", "./holography_data"))
             summary_file = data_dir / "processed_results" / "processing_summary.yaml"
@@ -56,10 +52,10 @@ class ResultsTabMixin:
             for res in summary.get("results", []):
                 powers = res.get("mode_powers", [])
                 pstr   = "  ".join(f"{p*100:.1f}%" for p in powers[:6])
-                self._results_tree.insert("", "end", values=(
+                QTreeWidgetItem(self._results_tree, [
                     res.get("filename", ""),
                     f"{res.get('fidelity', 0):.4f}",
                     pstr,
-                ))
+                ])
         except Exception:
             pass

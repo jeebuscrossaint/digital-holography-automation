@@ -1,20 +1,23 @@
 # -*- coding: utf-8 -*-
-"""HolographyApp — the application window, composed from one mixin per concern.
+"""HolographyApp — the Qt application window, composed from one mixin per
+concern (same decomposition as before, now on PySide6/Qt6).
 
-The mixins live in sibling modules and all operate on this class's ``self``;
-splitting them out keeps each file focused while the runtime object stays a
-single cohesive app (no behavior change from the original monolith).
-"""
+Worker threads never touch widgets directly: they call ``self._post(msg)``,
+which emits a Qt signal. Qt delivers that signal to the GUI thread (queued
+across threads automatically), where ``_dispatch_msg`` updates the UI — this
+replaces the old queue + ``after()`` polling pump, and is what makes the
+background hardware I/O safe without freezing the window."""
 
 import threading
-import queue
-import tkinter as tk
+
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QApplication, QMainWindow
 
 from . import runtime
-from .theme import ThemeMixin
+from .style import apply_theme
 from .shell import ShellMixin
-from .camera import CameraMixin
 from .connection import ConnectionMixin
+from .camera import CameraMixin
 from .experiment import ExperimentMixin
 from .tabs.run import RunTabMixin
 from .tabs.laser import LaserTabMixin
@@ -24,29 +27,34 @@ from .tabs.config import ConfigTabMixin
 from .tabs.results import ResultsTabMixin
 
 
+class _Bridge(QObject):
+    """Carries worker-thread messages onto the GUI thread via one signal."""
+    message = Signal(object)
+
+
 class HolographyApp(
+    QMainWindow,
     ShellMixin,
-    ThemeMixin,
-    RunTabMixin,
+    ConnectionMixin,
     CameraMixin,
+    ExperimentMixin,
+    RunTabMixin,
     LaserTabMixin,
     SwitchTabMixin,
     PolarizationTabMixin,
     ConfigTabMixin,
     ResultsTabMixin,
-    ConnectionMixin,
-    ExperimentMixin,
 ):
-    def __init__(self, root: tk.Tk):
-        self.root = root
-        self.root.title("Photonic Lantern Holography")
-        self.root.geometry("1320x880")
-        self.root.minsize(1100, 720)
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Photonic Lantern Holography")
+        self.resize(1320, 880)
+        self.setMinimumSize(1100, 720)
 
         self.hardware_connected = False
         self.experiment_running = False
         self.stop_event = threading.Event()
-        self.msg_queue: queue.Queue = queue.Queue()
+        self._stop_background = threading.Event()
 
         self.laser  = None
         self.camera = None
@@ -54,26 +62,34 @@ class HolographyApp(
         self.motors = None
         self.config = self._load_config()
 
-        self._setup_theme()
-        self._build_ui()
-        self._poll_queue()
-        self._stop_background = threading.Event()
-        threading.Thread(target=self._background_poller,  daemon=True).start()
-        threading.Thread(target=self._camera_preview_loop, daemon=True).start()
-        self._cam_first_frame_logged = False
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Thread → GUI bridge. Emitting from any thread is safe; the slot runs
+        # on the GUI thread.
+        self._bridge = _Bridge()
+        self._bridge.message.connect(self._dispatch_msg)
 
-    def _on_close(self):
+        self._build_ui()
+
+        self._cam_first_frame_logged = False
+        threading.Thread(target=self._background_poller,   daemon=True).start()
+        threading.Thread(target=self._camera_preview_loop, daemon=True).start()
+
+    def _post(self, msg: dict):
+        """Thread-safe: hand a message dict to the GUI thread."""
+        self._bridge.message.emit(msg)
+
+    def closeEvent(self, event):
         """Window close: stop experiment, disconnect hardware, then exit."""
         self._stop_background.set()
         if self.experiment_running:
             self.stop_event.set()
         self._shutdown_hardware()
-        self.root.destroy()
+        event.accept()
 
 
 def main():
     runtime.setup_logfile()
-    root = tk.Tk()
-    HolographyApp(root)
-    root.mainloop()
+    app = QApplication([])
+    apply_theme(app)
+    win = HolographyApp()
+    win.show()
+    app.exec()

@@ -1,85 +1,83 @@
 # -*- coding: utf-8 -*-
 """Configuration tab — a scrollable editor over experiment_config.yaml."""
 
-import tkinter as tk
-from tkinter import ttk, messagebox
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
+)
 
 from ..runtime import CONFIG_FILE
 
 
 class ConfigTabMixin:
     def _build_config_tab(self):
-        tab = ttk.Frame(self.notebook, padding=(2, 4))
-        self.notebook.add(tab, text="Configuration")
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(2, 4, 2, 4)
 
-        # Scrollable container — Canvas + inner Frame
-        outer = tk.Canvas(tab, highlightthickness=0, background="#1c1c1c")
-        vsb   = ttk.Scrollbar(tab, orient="vertical", command=outer.yview)
-        outer.configure(yscrollcommand=vsb.set)
-        vsb.pack(side="right", fill="y")
-        outer.pack(side="left", fill="both", expand=True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        inner = QWidget(); lay = QVBoxLayout(inner)
+        lay.setContentsMargins(14, 14, 14, 14)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
-        inner = ttk.Frame(outer, padding=14)
-        inner.bind("<Configure>",
-                   lambda e: outer.configure(scrollregion=outer.bbox("all")))
-        outer.create_window((0, 0), window=inner, anchor="nw")
+        self._cfg_widgets: dict = {}
 
-        self._cfg_vars: dict = {}
-
-        def section(title: str, pad_top: int = 14):
-            ttk.Label(inner, text=title, font=self._font_section).pack(
-                anchor="w", pady=(pad_top, 6))
+        def section(title: str):
+            s = QLabel(title); s.setObjectName("Section")
+            lay.addWidget(s)
 
         def field(label: str, key: str, default):
-            row = ttk.Frame(inner)
-            row.pack(fill="x", pady=3)
-            ttk.Label(row, text=label, width=32, anchor="w",
-                      font=self._font_body).pack(side="left")
-            var = tk.StringVar(value=str(default))
-            ttk.Entry(row, textvariable=var, width=44).pack(side="left", padx=6)
-            self._cfg_vars[key] = var
+            row = QHBoxLayout()
+            lbl = QLabel(label); lbl.setFixedWidth(200)
+            edit = QLineEdit(str(default))
+            edit.setMinimumWidth(320)          # wide boxes — show the whole value
+            row.addWidget(lbl); row.addWidget(edit, 1)
+            lay.addLayout(row)
+            self._cfg_widgets[key] = edit
 
         hw  = self.config.get("hardware", {})
         exp = self.config.get("experiment", {})
 
-        section("Hardware", pad_top=0)
-        field("Laser GPIB address",          "hardware.laser.gpib_address",
+        section("Hardware")
+        field("Laser GPIB address",        "hardware.laser.gpib_address",
               hw.get("laser", {}).get("gpib_address", "GPIB0::24::INSTR"))
-        field("Laser power (µW)",            "hardware.laser.power_uw",
+        field("Laser power (µW)",          "hardware.laser.power_uw",
               hw.get("laser", {}).get("power_uw", 208))
-        field("Camera URL",                  "hardware.camera.url",
+        field("Camera URL",                "hardware.camera.url",
               hw.get("camera", {}).get("url", "cam://0"))
-        field("Camera exposure (µs)",        "hardware.camera.exposure_time",
+        field("Camera exposure (µs)",      "hardware.camera.exposure_time",
               hw.get("camera", {}).get("exposure_time", 500))
-        field("Fiber switch COM port",       "hardware.fiber_switch.port",
+        field("Fiber switch COM port",     "hardware.fiber_switch.port",
               hw.get("fiber_switch", {}).get("port", "COM6"))
-        field("Motor serial number",         "hardware.polarization_motors.serial_number",
+        field("Motor serial number",       "hardware.polarization_motors.serial_number",
               hw.get("polarization_motors", {}).get("serial_number", "38394984"))
 
         section("Experiment")
         legs = exp.get("legs", list(range(1, 8)))
-        field("Legs",                        "experiment.legs",
-              ",".join(map(str, legs)))
+        field("Legs", "experiment.legs", ",".join(map(str, legs)))
         wls = exp.get("wavelengths", [1540, 1545, 1550, 1555, 1560, 1565, 1570])
-        field("Wavelengths (nm)",            "experiment.wavelengths",
-              ",".join(map(str, wls)))
+        field("Wavelengths (nm)", "experiment.wavelengths", ",".join(map(str, wls)))
         wt = exp.get("wait_times", {})
-        field("Wait after leg switch (s)",   "experiment.wait_times.after_leg_switch",
+        field("Wait after leg switch (s)", "experiment.wait_times.after_leg_switch",
               wt.get("after_leg_switch", 1.0))
-        field("Wait after wavelength (s)",   "experiment.wait_times.after_wavelength_change",
+        field("Wait after wavelength (s)", "experiment.wait_times.after_wavelength_change",
               wt.get("after_wavelength_change", 0.5))
         fd = exp.get("fringe_detection", {})
-        field("Min fringe visibility",       "experiment.fringe_detection.min_visibility",
+        field("Min fringe visibility", "experiment.fringe_detection.min_visibility",
               fd.get("min_visibility", 0.15))
-        field("Max polarization attempts",   "experiment.fringe_detection.max_attempts",
+        field("Max polarization attempts", "experiment.fringe_detection.max_attempts",
               fd.get("max_attempts", 5))
 
         section("Output")
-        field("Data output directory",       "data.output_dir",
+        field("Data output directory", "data.output_dir",
               self.config.get("data", {}).get("output_dir", "./holography_data"))
 
-        ttk.Button(inner, text="Save configuration", style="Accent.TButton",
-                   command=self._save_config).pack(anchor="w", pady=(16, 4))
+        save = QPushButton("Save configuration"); save.setObjectName("Accent")
+        save.clicked.connect(self._save_config)
+        lay.addWidget(save); lay.addStretch(1)
+
+        self.tabs.addTab(tab, "Configuration")
 
     def _save_config(self):
         import yaml
@@ -90,8 +88,8 @@ class ConfigTabMixin:
         except Exception:
             cfg = {}
 
-        for key_path, var in self._cfg_vars.items():
-            raw = var.get().strip()
+        for key_path, edit in self._cfg_widgets.items():
+            raw = edit.text().strip()
             if "," in raw:
                 parts = [p.strip() for p in raw.split(",") if p.strip()]
                 try:
@@ -114,4 +112,5 @@ class ConfigTabMixin:
 
         self.config = self._load_config()
         self._log("Configuration saved", "OK")
-        messagebox.showinfo("Saved", "Configuration saved to experiment_config.yaml")
+        QMessageBox.information(self, "Saved",
+                                "Configuration saved to experiment_config.yaml")

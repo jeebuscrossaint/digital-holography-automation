@@ -11,7 +11,7 @@ from .diagnostics import friendly_error
 
 class ConnectionMixin:
     def _connect_hardware(self):
-        self._connect_btn.configure(state="disabled")
+        self._connect_btn.setEnabled(False)
         self._log("Connecting to hardware…", "INFO")
         threading.Thread(target=self._connect_worker, daemon=True).start()
 
@@ -36,13 +36,13 @@ class ConnectionMixin:
 
         self._connected_names = ok
         self.hardware_connected = len(ok) > 0
-        self.msg_queue.put({"type": "done", "event": "connect", "success": True})
+        self._post({"type": "done", "event": "connect", "success": True})
 
     def _emit(self, text, level="INFO"):
-        self.msg_queue.put({"type": "log", "text": text, "level": level})
+        self._post({"type": "log", "text": text, "level": level})
 
     def _hw(self, device, status):
-        self.msg_queue.put({"type": "hw_status", "device": device, "status": status})
+        self._post({"type": "hw_status", "device": device, "status": status})
 
     def _connect_laser(self, record_ok, record_fail):
         self._hw("laser", "connecting")
@@ -52,9 +52,8 @@ class ConnectionMixin:
         try:
             from HPTunableLaserSource import HPTunableLaserSource
             self.laser = HPTunableLaserSource(addr)
-            # Only set the display unit so queries come back in µW.
-            # Don't touch power or output state — keep whatever the laser
-            # is currently set to. The user controls them from the Laser tab.
+            # Only set the display unit so queries come back in µW. Don't touch
+            # power or output state — keep whatever the laser is set to.
             self.laser.changePowerUnit(cfg_l.get("power_unit", "UW"))
             self._hw("laser", "connected")
             self._emit(f"✓ Laser  {addr}", "OK")
@@ -91,9 +90,8 @@ class ConnectionMixin:
             self._emit(f"✓ Camera  Xenics Bobcat 320 GigE  SER:{ser}", "OK")
             no_frames = False
             for line in getattr(self.camera, "init_log", []):
-                # Escalate the self-diagnostics so a dead stream is obvious,
-                # not buried in DEBUG. "Connected but no frames" is the trap
-                # that cost days — make it a loud, actionable warning.
+                # Escalate the self-diagnostics so a dead stream is obvious.
+                # "Connected but no frames" is the trap that cost days.
                 if "NO FRAMES" in line:
                     no_frames = True
                     self._emit(f"  ⚠ {line}", "WARN")
@@ -102,8 +100,6 @@ class ConnectionMixin:
                 else:
                     self._emit(f"  {line}", "DEBUG")
             if no_frames:
-                # Control channel is up but the image stream isn't — flag the
-                # tile so nobody mistakes the green dot for "working".
                 self._hw("camera", "error")
             record_ok("Camera")
         except Exception as e:
@@ -121,8 +117,7 @@ class ConnectionMixin:
             self.switch = D700DiconSwitch(port=port, baudrate=cfg_s.get("baudrate", 9600))
             self._hw("switch", "connected")
             self._emit(f"✓ Switch  Dicon GP700  {port}", "OK")
-            # Confirm the device actually talks back (port opening proves
-            # nothing). An empty ID = serial opened but the switch is mute.
+            # Confirm the device actually talks back (opening proves nothing).
             try:
                 ident = self.switch.identify() if hasattr(self.switch, "identify") else ""
                 if ident:
@@ -165,13 +160,10 @@ class ConnectionMixin:
         try:
             from polMotors import polMotors
             self.motors = polMotors(serialNumber=serial.encode())
-            # Don't auto-home or auto-move — that puts paddle 3 in a
-            # state where subsequent moves are ignored on this firmware.
-            # User can home via the Polarization tab Home buttons.
+            # Don't auto-home or auto-move — that puts paddle 3 in a state where
+            # subsequent moves are ignored on this firmware.
             self._hw("motors", "connected")
             self._emit(f"✓ Motors  Thorlabs MPC320  SN:{serial}  connected", "OK")
-            # Per-paddle diagnostic so we can see whether each paddle is
-            # actually being addressed correctly by the SDK
             for p in (1, 2, 3):
                 try:
                     pos = self.motors.getPosition(p)
@@ -187,8 +179,7 @@ class ConnectionMixin:
 
     def _shutdown_hardware(self):
         """Safely power down + close every connected instrument. Best-effort:
-        each step is independent so one failure doesn't strand the others.
-        Shared by the Disconnect button and window-close."""
+        each step independent so one failure doesn't strand the others."""
         for obj, method in [
             (self.laser,  lambda: (self.laser.outputState(False), self.laser.closeConnection())),
             (self.camera, lambda: (self.camera.stopCapture(), self.camera.closeCamera())),
@@ -212,8 +203,8 @@ class ConnectionMixin:
 
         for dev in self._hw_dots:
             self._set_hw_dot(dev, "disconnected")
-        self._connect_btn.configure(state="normal")
-        self._disconnect_btn.configure(state="disabled")
-        self._start_btn.configure(state="disabled")
-        self._status_var.set("Hardware disconnected")
+        self._connect_btn.setEnabled(True)
+        self._disconnect_btn.setEnabled(False)
+        self._start_btn.setEnabled(False)
+        self._status_lbl.setText("Hardware disconnected")
         self._log("Hardware disconnected", "INFO")

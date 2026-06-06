@@ -68,7 +68,7 @@ the camera firewall rule — see **[LAB_SETUP.md](LAB_SETUP.md)**.
 
 ```
 main.py                app launcher (thin entry point)
-gui/                   tkinter app — window, tabs, acquisition + processing loop
+gui/                   PySide6 (Qt6) app — window, tabs, acquisition + processing loop
 data_processing.py     hologram reconstruction + LP-mode decomposition
 fringe_detection.py    fringe metric + polarization auto-optimizer
 hardware/              instrument drivers (laser, camera, switch, motors)
