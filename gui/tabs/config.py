@@ -29,9 +29,10 @@ class ConfigTabMixin:
 
         def field(label: str, key: str, default):
             row = QHBoxLayout()
-            lbl = QLabel(label); lbl.setFixedWidth(220)
+            lbl = QLabel(label); lbl.setFixedWidth(200)
             edit = QLineEdit(str(default))
-            row.addWidget(lbl); row.addWidget(edit); row.addStretch(1)
+            edit.setMinimumWidth(320)          # wide boxes — show the whole value
+            row.addWidget(lbl); row.addWidget(edit, 1)
             lay.addLayout(row)
             self._cfg_widgets[key] = edit
 

@@ -76,9 +76,14 @@ QPushButton#Accent {{ background: {ACCENT_BLUE}; border: none; color: white; }}
 QPushButton#Accent:hover {{ background: #1a86d9; }}
 QPushButton#Accent:disabled {{ background: #2a3f52; color: #6f8597; }}
 
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-    background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px 6px;
+QLineEdit {{
+    background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 5px 8px;
 }}
+/* Spin boxes are deliberately NOT given a background/border here. A stylesheet
+   on a QSpinBox drops Qt's native up/down arrow glyphs (they render as blank
+   buttons) unless you also ship arrow images — so let Fusion draw them, which
+   honours the dark palette and keeps working arrows. Just widen the field. */
+QSpinBox, QDoubleSpinBox {{ min-height: 24px; }}
 QProgressBar {{
     background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px;
     text-align: center; height: 18px;
