@@ -1,4 +1,4 @@
-"""Bundle the tkinter GUI (main.py) into a single native Windows .exe.
+"""Bundle the PySide6 (Qt6) GUI (main.py) into a single native Windows .exe.
 
 The result is a standalone desktop app — no Python, Node, web server, or
 WebView2 needed on the target machine. (The two hardware SDKs — Keysight IO
@@ -36,7 +36,7 @@ def main():
         "XenicsCam", "HPTunableLaserSource", "D700DiconSwitch", "polMotors",
         "MMF", "calebsUsefulFunctions", "usefulFunctions",
     ]
-    collect = ["sv_ttk", "xenics"]   # packages that ship data files / submodules
+    collect = ["PySide6", "xenics"]   # packages that ship data files / submodules / Qt plugins
 
     cmd = [
         sys.executable, "-m", "PyInstaller",

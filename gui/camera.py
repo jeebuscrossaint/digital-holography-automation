@@ -1,14 +1,49 @@
 # -*- coding: utf-8 -*-
 """Live camera preview — the background grab loop, live saturation warnings,
-and rendering frames onto the Run tab's canvas."""
+and rendering frames onto the Run tab's preview label.
+
+PreviewLabel rescales a *cached* pixmap on resize (a cheap Qt scale), so
+maximizing / dragging the window is smooth — no per-event re-render of the
+source frame (that jank was the tkinter canvas redrawing on every Configure)."""
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import QLabel
+
+from .style import MUTED
+
+
+class PreviewLabel(QLabel):
+    """Shows a camera frame, scaled to fit while keeping aspect ratio. Holds the
+    source pixmap so resizing just rescales it (no source re-render)."""
+    def __init__(self):
+        super().__init__("No signal")
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumSize(360, 280)
+        self.setStyleSheet(f"background:#0a0a0a; border:1px solid #3a3a3a; color:{MUTED}")
+        self._src: QPixmap | None = None
+
+    def set_frame(self, pixmap: QPixmap):
+        self._src = pixmap
+        self._rescale()
+
+    def resizeEvent(self, event):
+        self._rescale()
+        super().resizeEvent(event)
+
+    def _rescale(self):
+        if self._src is None:
+            return
+        self.setPixmap(self._src.scaled(
+            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
 
 class CameraMixin:
     def _camera_preview_loop(self):
-        """Continuous live preview — grab a frame ~10× per second whenever
-        the camera is connected. Surfaces the first frame's stats, OR a
-        warning if the SDK keeps returning no frames (so the user can
-        see the difference between 'no light' and 'no frames at all')."""
+        """Continuous live preview — grab a frame ~10× per second whenever the
+        camera is connected. Surfaces the first frame's stats, OR a warning if
+        the SDK keeps returning no frames (so the user can see the difference
+        between 'no light' and 'no frames at all')."""
         import numpy as np
         from fringe_detection import check_saturation
         val = self.config.get("experiment", {}).get("validation", {})
@@ -25,21 +60,18 @@ class CameraMixin:
                         null_streak = 0
                         if not self._cam_first_frame_logged:
                             arr = np.asarray(frame)
-                            self.msg_queue.put({
+                            self._post({
                                 "type": "log",
                                 "text": (f"Camera frame: shape={arr.shape}, "
                                          f"dtype={arr.dtype}, "
                                          f"min={int(arr.min())}, max={int(arr.max())}, "
                                          f"mean={float(arr.mean()):.1f}"),
-                                "level": "DEBUG",
-                            })
+                                "level": "DEBUG"})
                             self._cam_first_frame_logged = True
-                        # Live saturation warning — lets you back off exposure /
-                        # power while aligning, before clipping ruins a run.
                         sat = check_saturation(frame, sat_level=sat_level,
                                                sat_fraction_max=sat_frac_max)
                         if sat["saturated"] and not was_saturated:
-                            self.msg_queue.put({
+                            self._post({
                                 "type": "log",
                                 "text": (f"⚠ Camera SATURATING — "
                                          f"{sat['fraction']*100:.2f}% of pixels "
@@ -49,33 +81,29 @@ class CameraMixin:
                                          f"holograms."),
                                 "level": "WARN"})
                         elif was_saturated and not sat["saturated"]:
-                            self.msg_queue.put({
-                                "type": "log",
-                                "text": "✓ Saturation cleared.", "level": "OK"})
+                            self._post({"type": "log",
+                                        "text": "✓ Saturation cleared.", "level": "OK"})
                         was_saturated = sat["saturated"]
-                        self.msg_queue.put({"type": "frame", "data": frame})
+                        self._post({"type": "frame", "data": frame})
                     else:
                         null_streak += 1
                         if null_streak == 5 and not self._cam_first_frame_logged:
-                            self.msg_queue.put({
+                            self._post({
                                 "type": "log",
                                 "text": ("Camera connected but no frames are "
                                          "arriving. Almost always: (1) Windows "
                                          "Firewall is blocking inbound GigE "
-                                         "stream packets for this Python — run "
+                                         "stream packets for this app — run "
                                          "tools/setup_lab_machine.ps1 as admin; "
                                          "or (2) Xeneth is open and holding the "
                                          "camera — close it. NOT a light issue."),
-                                "level": "WARN",
-                            })
+                                "level": "WARN"})
                             self._cam_first_frame_logged = True
                 except Exception as e:
                     if not self._cam_first_frame_logged:
-                        self.msg_queue.put({
-                            "type": "log",
-                            "text": f"Camera getFrame failed: {e}",
-                            "level": "WARN",
-                        })
+                        self._post({"type": "log",
+                                    "text": f"Camera getFrame failed: {e}",
+                                    "level": "WARN"})
                         self._cam_first_frame_logged = True
             else:
                 if cam is None:
@@ -83,47 +111,28 @@ class CameraMixin:
                     null_streak = 0
             self._stop_background.wait(0.1)
 
-    def _redraw_frame(self):
-        if self._last_frame is not None:
-            self._show_frame(self._last_frame)
-
     def _show_frame(self, data):
+        """Render a raw camera frame onto the preview label (GUI thread)."""
+        import numpy as np
         self._last_frame = data
         try:
-            from PIL import Image, ImageTk
-            import numpy as np
-
             arr = np.asarray(data)
-            # Normalize to 0–255 uint8 for display. Stretch using mean ±
-            # 3·std rather than absolute min/max — Bobcat 320 frames are
-            # 14-bit; raw min/max stretch makes a uniform sensor noise
-            # field look like vague clouds and a real signal look flat.
             if arr.size == 0:
                 return
+            # Normalize to 0–255 uint8. Stretch using mean ± 3·std rather than
+            # absolute min/max — Bobcat 320 frames are 14-bit; raw min/max
+            # stretch makes sensor noise look like clouds and signal look flat.
             f = arr.astype(np.float32)
             mu, sd = float(f.mean()), float(f.std())
             if sd < 1e-6:
-                # Truly flat frame — show as mid-gray so it's obvious vs.
-                # a stretched bright frame
-                arr = np.full(f.shape, 128, dtype=np.uint8)
+                disp = np.full(f.shape, 128, dtype=np.uint8)
             else:
                 lo, hi = mu - 3 * sd, mu + 3 * sd
-                arr = np.clip((f - lo) / max(hi - lo, 1e-6) * 255, 0, 255).astype(np.uint8)
+                disp = np.clip((f - lo) / max(hi - lo, 1e-6) * 255, 0, 255).astype(np.uint8)
 
-            cw = max(self._canvas.winfo_width(),  10)
-            ch = max(self._canvas.winfo_height(), 10)
-
-            # Fit image while preserving aspect ratio
-            ih, iw = arr.shape
-            scale = min(cw / iw, ch / ih)
-            tw, th = max(int(iw * scale), 1), max(int(ih * scale), 1)
-
-            img   = Image.fromarray(arr, mode="L").resize((tw, th), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
-            self._canvas.delete("nosignal")
-            self._canvas.delete("frame")
-            self._canvas.create_image(cw // 2, ch // 2, anchor="center",
-                                      image=photo, tags="frame")
-            self._canvas_photo = photo  # prevent GC
+            disp = np.ascontiguousarray(disp)
+            h, w = disp.shape
+            img = QImage(bytes(disp.data), w, h, w, QImage.Format_Grayscale8)
+            self._preview_lbl.set_frame(QPixmap.fromImage(img))
         except Exception:
             pass

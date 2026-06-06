@@ -1,134 +1,130 @@
 # -*- coding: utf-8 -*-
 """Run Experiment tab — mode/run controls, progress, live exposure + snapshot,
-and the camera preview canvas. The preview *loop* and frame rendering live in
-``gui.camera``; this tab builds the controls and the canvas they target."""
+and the camera preview. The preview *loop* and frame rendering live in
+``gui.camera``; this tab builds the controls and the label they target."""
 
 import threading
-import tkinter as tk
-from tkinter import ttk
 
-from ..theme import MUTED
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QButtonGroup, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QProgressBar,
+    QPushButton, QRadioButton, QVBoxLayout, QWidget,
+)
+
+from ..camera import PreviewLabel
+from ..style import MUTED
 
 
 class RunTabMixin:
     def _build_run_tab(self):
-        tab = ttk.Frame(self.notebook, padding=14)
-        self.notebook.add(tab, text="Run Experiment")
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+        lay.setContentsMargins(14, 14, 14, 14)
 
         # Row 1 — mode selector + run controls
-        ctrl = ttk.Frame(tab)
-        ctrl.pack(fill="x", pady=(0, 12))
-
-        ttk.Label(ctrl, text="Mode", font=self._font_body_bold).pack(side="left", padx=(0, 12))
-        self._run_mode = tk.StringVar(value="full")
+        ctrl = QHBoxLayout()
+        mode_lbl = QLabel("Mode"); mode_lbl.setStyleSheet("font-weight:bold")
+        ctrl.addWidget(mode_lbl)
+        self._mode_group = QButtonGroup(tab)
+        self._mode_buttons = {}
         for label, val in (("Collect", "collect"), ("Process", "process"), ("Full Run", "full")):
-            ttk.Radiobutton(ctrl, text=label, variable=self._run_mode,
-                            value=val).pack(side="left", padx=8)
+            rb = QRadioButton(label)
+            if val == "full":
+                rb.setChecked(True)
+            self._mode_group.addButton(rb)
+            self._mode_buttons[val] = rb
+            ctrl.addWidget(rb)
+        ctrl.addStretch(1)
+        self._start_btn = QPushButton("Start Experiment"); self._start_btn.setObjectName("Accent")
+        self._start_btn.setEnabled(False)
+        self._start_btn.clicked.connect(self._start_experiment)
+        self._stop_btn = QPushButton("Stop"); self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._stop_experiment)
+        ctrl.addWidget(self._start_btn); ctrl.addWidget(self._stop_btn)
+        lay.addLayout(ctrl)
 
-        self._stop_btn = ttk.Button(ctrl, text="Stop",
-                                    command=self._stop_experiment, state="disabled")
-        self._stop_btn.pack(side="right", padx=(6, 0))
-        self._start_btn = ttk.Button(ctrl, text="Start Experiment",
-                                     style="Accent.TButton",
-                                     command=self._start_experiment, state="disabled")
-        self._start_btn.pack(side="right")
-
-        ttk.Separator(tab, orient="horizontal").pack(fill="x", pady=(0, 10))
+        line = QFrame(); line.setFrameShape(QFrame.HLine); line.setStyleSheet(f"color:{MUTED}")
+        lay.addWidget(line)
 
         # Row 2 — progress
-        ttk.Label(tab, text="Progress", font=self._font_section).pack(anchor="w")
-        self._progress_var = tk.DoubleVar(value=0)
-        ttk.Progressbar(tab, variable=self._progress_var,
-                        maximum=100).pack(fill="x", pady=(6, 4))
-
-        self._status_var = tk.StringVar(value="Connect hardware to begin")
-        ttk.Label(tab, textvariable=self._status_var,
-                  font=self._font_body).pack(anchor="w", pady=(0, 6))
+        sec = QLabel("Progress"); sec.setObjectName("Section"); lay.addWidget(sec)
+        self._progress_bar = QProgressBar(); self._progress_bar.setRange(0, 100)
+        lay.addWidget(self._progress_bar)
+        self._status_lbl = QLabel("Connect hardware to begin")
+        lay.addWidget(self._status_lbl)
 
         # Metric strip
-        metrics = ttk.Frame(tab)
-        metrics.pack(fill="x", pady=(0, 14))
-        self._leg_var    = tk.StringVar(value="—")
-        self._wl_var     = tk.StringVar(value="—")
-        self._acq_var    = tk.StringVar(value="0 / 0")
-        self._fringe_var = tk.StringVar(value="—")
+        metrics = QHBoxLayout()
+        self._leg_lbl    = QLabel("—")
+        self._wl_lbl     = QLabel("—")
+        self._acq_lbl    = QLabel("0 / 0")
+        self._fringe_lbl = QLabel("—")
+        for title, w in (("LEG", self._leg_lbl), ("WAVELENGTH", self._wl_lbl),
+                         ("IMAGES", self._acq_lbl), ("FRINGE", self._fringe_lbl)):
+            cell = QVBoxLayout()
+            cap = QLabel(title); cap.setObjectName("Small")
+            w.setObjectName("Metric")
+            cell.addWidget(cap); cell.addWidget(w)
+            metrics.addLayout(cell); metrics.addSpacing(28)
+        metrics.addStretch(1)
+        lay.addLayout(metrics)
 
-        for col, (label, var) in enumerate((
-            ("Leg",        self._leg_var),
-            ("Wavelength", self._wl_var),
-            ("Images",     self._acq_var),
-            ("Fringe",     self._fringe_var),
-        )):
-            cell = ttk.Frame(metrics)
-            cell.grid(row=0, column=col, sticky="w", padx=(0, 32))
-            ttk.Label(cell, text=label.upper(), font=self._font_small,
-                      foreground=MUTED).pack(anchor="w")
-            ttk.Label(cell, textvariable=var, font=self._font_metric).pack(anchor="w")
-
-        # Exposure control (live) — raise to brighten / drive saturation,
-        # lower to avoid clipping. The configured value is applied at connect.
-        expf = ttk.Frame(tab)
-        expf.pack(fill="x", pady=(2, 6))
-        ttk.Label(expf, text="Exposure", foreground=MUTED).pack(side="left", padx=(0, 6))
-        self._cam_exp_target = tk.DoubleVar(
-            value=float(self.config.get("hardware", {})
-                        .get("camera", {}).get("exposure_time", 500)))
-        sp_exp = ttk.Spinbox(expf, from_=1, to=262143, increment=100,
-                             textvariable=self._cam_exp_target, width=10, format="%.0f")
-        sp_exp.pack(side="left", padx=2)
-        sp_exp.bind("<Return>", lambda _e: self._set_exposure())
-        ttk.Label(expf, text="µs", foreground=MUTED).pack(side="left", padx=(2, 6))
-        ttk.Button(expf, text="Set", style="Accent.TButton",
-                   command=self._set_exposure).pack(side="left", padx=2)
-        ttk.Button(expf, text="📷 Save snapshot",
-                   command=self._save_snapshot).pack(side="left", padx=(16, 2))
-        ttk.Label(expf, text="↑ brighten / saturate   ↓ avoid clipping",
-                  foreground=MUTED, font=self._font_small).pack(side="left", padx=(10, 0))
+        # Exposure control (live) — raise to brighten / drive saturation, lower
+        # to avoid clipping. The configured value is applied at connect.
+        expf = QHBoxLayout()
+        elbl = QLabel("Exposure"); elbl.setObjectName("Muted"); expf.addWidget(elbl)
+        self._cam_exp_spin = QDoubleSpinBox()
+        self._cam_exp_spin.setRange(1, 262143); self._cam_exp_spin.setDecimals(0)
+        self._cam_exp_spin.setSingleStep(100)
+        self._cam_exp_spin.setValue(float(self.config.get("hardware", {})
+                                          .get("camera", {}).get("exposure_time", 500)))
+        expf.addWidget(self._cam_exp_spin)
+        expf.addWidget(QLabel("µs"))
+        set_btn = QPushButton("Set"); set_btn.setObjectName("Accent")
+        set_btn.clicked.connect(self._set_exposure); expf.addWidget(set_btn)
+        snap_btn = QPushButton("📷 Save snapshot")
+        snap_btn.clicked.connect(self._save_snapshot); expf.addWidget(snap_btn)
+        hint = QLabel("↑ brighten / saturate   ↓ avoid clipping"); hint.setObjectName("Small")
+        expf.addWidget(hint); expf.addStretch(1)
+        lay.addLayout(expf)
 
         # Camera preview
-        ttk.Label(tab, text="Camera Preview",
-                  font=self._font_section).pack(anchor="w", pady=(2, 6))
-        preview = ttk.Frame(tab)
-        preview.pack(fill="both", expand=True)
+        pv = QLabel("Camera Preview"); pv.setObjectName("Section"); lay.addWidget(pv)
+        self._preview_lbl = PreviewLabel()
+        self._last_frame = None
+        lay.addWidget(self._preview_lbl, 1)
 
-        self._canvas = tk.Canvas(preview, bg="#0a0a0a", highlightthickness=1,
-                                 highlightbackground="#3a3a3a")
-        self._canvas.pack(fill="both", expand=True)
-        self._canvas_photo = None
-        self._last_frame   = None
-        self._canvas.bind("<Configure>", lambda _e: self._redraw_frame())
-        self._canvas.create_text(220, 120, text="No signal",
-                                 fill=MUTED, font=self._font_metric, tags="nosignal")
+        self.tabs.addTab(tab, "Run Experiment")
+
+    def _selected_mode(self) -> str:
+        for val, rb in self._mode_buttons.items():
+            if rb.isChecked():
+                return val
+        return "full"
 
     def _set_exposure(self):
         if not self.camera:
             self._log("Camera not connected.", "WARN")
             return
-        us = float(self._cam_exp_target.get())
+        us = float(self._cam_exp_spin.value())
         self._log(f"Camera exposure → {us:.0f} µs", "INFO")
         self._mark_user_action()
-        threading.Thread(target=self._set_exposure_worker,
-                         args=(us,), daemon=True).start()
+        threading.Thread(target=self._set_exposure_worker, args=(us,), daemon=True).start()
 
     def _set_exposure_worker(self, us):
         try:
             actual = self.camera.setExposure(us)
-            self.msg_queue.put({"type": "log",
-                                "text": f"  Exposure now {actual:.0f} µs",
-                                "level": "OK"})
+            self._post({"type": "log", "text": f"  Exposure now {actual:.0f} µs", "level": "OK"})
         except Exception as e:
-            self.msg_queue.put({"type": "log",
-                                "text": f"Set exposure failed: {e}", "level": "WARN"})
+            self._post({"type": "log", "text": f"Set exposure failed: {e}", "level": "WARN"})
 
     def _save_snapshot(self):
         """Save the current camera frame as a hologram for analysis — raw .npy
-        (16-bit, for processing) + .png (preview) + .yaml (metadata). Works
-        without the switch, so it's the quick way to hand the PI some data."""
+        (16-bit) + .png (preview) + .yaml (metadata). Works without the switch."""
         import numpy as np
         frame = self._last_frame
         if frame is None:
-            self._log("No frame to save — connect the camera and wait for preview.",
-                      "WARN")
+            self._log("No frame to save — connect the camera and wait for preview.", "WARN")
             return
         threading.Thread(target=self._save_snapshot_worker,
                          args=(np.asarray(frame),), daemon=True).start()
@@ -145,7 +141,6 @@ class RunTabMixin:
             base = os.path.join(out, f"snapshot_{stamp}")
             np.save(base + ".npy", arr)                       # raw 16-bit for analysis
 
-            # 8-bit PNG preview for quick viewing / sharing
             try:
                 from PIL import Image
                 a = arr.astype(float)
@@ -156,32 +151,31 @@ class RunTabMixin:
             except Exception:
                 pass
 
-            # metadata: conditions + a fringe-quality / saturation read
             meta = {"timestamp": datetime.now().isoformat(),
                     "max_value": int(arr.max()), "mean": float(arr.mean())}
             try:
-                from fringe_detection import (calculate_sideband_energy,
-                                              check_saturation)
+                from fringe_detection import (calculate_sideband_energy, check_saturation)
                 meta["sideband_metric"] = float(calculate_sideband_energy(arr))
                 sat = check_saturation(arr)
                 meta["saturated"] = bool(sat["saturated"])
                 meta["fill_fraction"] = float(sat["fill_fraction"])
             except Exception:
                 pass
-            for key, var in (("target_wavelength_nm", "_laser_wl_target"),
-                             ("exposure_us", "_cam_exp_target")):
-                try:
-                    meta[key] = float(getattr(self, var).get())
-                except Exception:
-                    pass
+            try:
+                meta["target_wavelength_nm"] = float(self._laser_wl_spin.value())
+            except Exception:
+                pass
+            try:
+                meta["exposure_us"] = float(self._cam_exp_spin.value())
+            except Exception:
+                pass
             with open(base + ".yaml", "w") as f:
                 yaml.dump(meta, f)
 
             sb = meta.get("sideband_metric")
             tail = f"  (sideband={sb:.0f})" if sb is not None else ""
-            self.msg_queue.put({"type": "log",
-                                "text": f"📷 Saved {os.path.basename(base)}.npy "
-                                        f"(+png +yaml){tail}", "level": "OK"})
+            self._post({"type": "log",
+                        "text": f"📷 Saved {os.path.basename(base)}.npy (+png +yaml){tail}",
+                        "level": "OK"})
         except Exception as e:
-            self.msg_queue.put({"type": "log",
-                                "text": f"Snapshot save failed: {e}", "level": "WARN"})
+            self._post({"type": "log", "text": f"Snapshot save failed: {e}", "level": "WARN"})

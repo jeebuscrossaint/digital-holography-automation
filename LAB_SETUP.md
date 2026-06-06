@@ -77,7 +77,7 @@ if a packaged build is present, for `dist/Digital Holography.exe`.
 
 ### Native desktop app — the deliverable (single .exe, recommended)
 
-The shipping app is the tkinter GUI packaged as **one native Windows
+The shipping app is the PySide6 (Qt6) GUI packaged as **one native Windows
 executable** — no Python, Node, web server, or WebView2 on the target machine.
 
 Build it (on a dev machine with the venv):
@@ -90,7 +90,7 @@ Editable data (experiment_config.yaml, session.log, holography_data/) is created
 (Keysight IO Libraries + Xenics Xeneth) and the camera firewall rule
 (`tools/setup_lab_machine.ps1`) still need to be set up once per machine.
 
-### Running from source (tkinter)
+### Running from source (Qt)
 
 If you have the repo + venv, you can run the same GUI without packaging — needs
 `uv` but no Node/Rust:

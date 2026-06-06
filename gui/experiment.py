@@ -7,7 +7,8 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox
+
+from PySide6.QtWidgets import QMessageBox
 
 from .runtime import CONFIG_FILE
 
@@ -15,28 +16,26 @@ from .runtime import CONFIG_FILE
 class ExperimentMixin:
     def _start_experiment(self):
         if not self.hardware_connected:
-            messagebox.showwarning("Not Connected", "Connect hardware first.")
+            QMessageBox.warning(self, "Not Connected", "Connect hardware first.")
             return
-        mode = self._run_mode.get()
+        mode = self._selected_mode()
         self.experiment_running = True
         self.stop_event.clear()
-        self._start_btn.configure(state="disabled")
-        self._stop_btn.configure(state="normal")
-        self._progress_var.set(0)
-        self._status_var.set("Starting…")
+        self._start_btn.setEnabled(False)
+        self._stop_btn.setEnabled(True)
+        self._progress_bar.setValue(0)
+        self._status_lbl.setText("Starting…")
         self._log(f"Experiment started (mode: {mode})", "INFO")
         threading.Thread(target=self._experiment_worker,
                          args=(mode,), daemon=True).start()
 
     def _stop_experiment(self):
         self.stop_event.set()
-        self._stop_btn.configure(state="disabled")
+        self._stop_btn.setEnabled(False)
         self._log("Stop requested — finishing current acquisition…", "WARN")
 
     def _experiment_worker(self, mode: str):
-        q = self.msg_queue
-        cb = q.put
-
+        cb = self._post
         try:
             if mode in ("collect", "full"):
                 self._run_collection(cb)
@@ -45,18 +44,17 @@ class ExperimentMixin:
 
             if self.stop_event.is_set():
                 cb({"type": "log", "text": "Experiment stopped by user.", "level": "WARN"})
-                q.put({"type": "done", "event": "experiment", "success": False})
+                cb({"type": "done", "event": "experiment", "success": False})
             else:
                 cb({"type": "log", "text": "✓ Experiment complete!", "level": "OK"})
-                q.put({"type": "done", "event": "experiment", "success": True})
+                cb({"type": "done", "event": "experiment", "success": True})
         except Exception as e:
             import traceback
             cb({"type": "log", "text": f"Experiment error: {e}", "level": "ERROR"})
             cb({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
-            q.put({"type": "done", "event": "experiment", "success": False})
+            cb({"type": "done", "event": "experiment", "success": False})
 
     # ── Collection ────────────────────────────────────────────────────────────
-
     def _run_collection(self, cb):
         import numpy as np
         import yaml
@@ -210,7 +208,6 @@ class ExperimentMixin:
             "text": f"Collection done — {n} images saved to {out}", "level": "OK"})
 
     # ── Processing ────────────────────────────────────────────────────────────
-
     def _run_processing(self, cb):
         import yaml
 
@@ -267,49 +264,44 @@ class ExperimentMixin:
         cb({"type": "progress", "percent": 100, "status": "Processing complete"})
         cb({"type": "log", "text": "Data processing complete", "level": "OK"})
 
-    # ── Done handler ──────────────────────────────────────────────────────────
-
+    # ── Done handler (GUI thread) ───────────────────────────────────────────────
     def _on_done(self, event: str, success: bool):
         self.experiment_running = False
-        self._stop_btn.configure(state="disabled")
+        self._stop_btn.setEnabled(False)
 
         if event == "connect":
             ok    = getattr(self, "_connected_names", [])
             all_4 = ("Laser", "Camera", "Switch", "Motors")
             off   = [d for d in all_4 if d not in ok]
 
-            self._connect_btn.configure(state="disabled")
-            self._disconnect_btn.configure(state="normal")
+            self._connect_btn.setEnabled(False)
+            self._disconnect_btn.setEnabled(True)
 
             if len(ok) == 4:
-                self._status_var.set("All 4 devices connected — ready to run")
+                self._status_lbl.setText("All 4 devices connected — ready to run")
                 self._log("All hardware connected. Press ▶ START when ready.", "OK")
             elif len(ok) == 0:
-                self._status_var.set("No devices connected — check cables & config")
+                self._status_lbl.setText("No devices connected — check cables & config")
                 self._log("No devices connected. Check cables, COM ports, and GPIB address.", "ERROR")
-                # Re-enable connect so they can retry after fixing things
-                self._connect_btn.configure(state="normal")
-                self._disconnect_btn.configure(state="disabled")
+                self._connect_btn.setEnabled(True)
+                self._disconnect_btn.setEnabled(False)
             else:
                 summary = f"{len(ok)}/4 connected: {', '.join(ok)}"
                 missing = f"Offline: {', '.join(off)}"
-                self._status_var.set(f"{summary} — {missing}")
+                self._status_lbl.setText(f"{summary} — {missing}")
                 self._log(f"{summary}", "OK")
                 self._log(f"{missing} — plug in and click Connect to retry", "WARN")
 
-            # Enable START as long as something is connected
-            self._start_btn.configure(state="normal" if ok else "disabled")
-            # Initialize Polarization tab slider targets from the actual angles
+            self._start_btn.setEnabled(bool(ok))
             if "Motors" in ok:
                 self._sync_paddle_targets_from_hw()
         elif event == "experiment":
-            self._start_btn.configure(
-                state="normal" if self.hardware_connected else "disabled")
+            self._start_btn.setEnabled(self.hardware_connected)
             if success:
-                self._progress_var.set(100)
-                self._status_var.set("Experiment complete!")
+                self._progress_bar.setValue(100)
+                self._status_lbl.setText("Experiment complete!")
                 self._refresh_results()
-                messagebox.showinfo("Done",
+                QMessageBox.information(self, "Done",
                     "Experiment completed successfully!\nCheck the Results tab.")
             else:
-                self._status_var.set("Stopped / error — see log")
+                self._status_lbl.setText("Stopped / error — see log")
