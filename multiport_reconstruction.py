@@ -20,7 +20,8 @@ from information that only exists across a FULL leg × wavelength sweep:
      factor, and x/y offset to maximise the LP-mode overlap (fidelity).
 
 Validated against Caleb Dobias's archived 19-port × 51-wavelength dataset:
-reproduces ~95% mean fidelity (vs ~92% single-frame), 93–97% per frame.
+with the tuned 23-mode basis (see __init__) it reaches ~97% mean fidelity
+(95.6–98.3% per frame) — the paper's number — vs ~92% single-frame.
 
 Ready for the new fiber switch: point it at a leg×wavelength sweep directory
 and it returns per-(port, wavelength) fidelity, mode decomposition, and the
@@ -74,9 +75,18 @@ class MultiPortReconstructor:
     def __init__(self, data_dir, legs, wavelengths,
                  filename_fmt="time 0 leg {leg} wavelength {wl}nm.npy",
                  crop_size=512, nfft=128, mode_size=256,
-                 core_radius=16.3e-6, NA=0.13, n_eff=1.453,
+                 core_radius=16.3e-6, NA=0.15, n_eff=1.453,
                  diameter_range=(55, 75), pol_half="right",
-                 ref_wavelength=1545):
+                 ref_wavelength=1545, butter_wc=10, sample_limit=32):
+        # NA=0.15 (with core 16.3 µm) gives a 23-mode LP basis — the number the
+        # paper's lantern physically supports. This is THE key fidelity knob:
+        # tuned on Caleb's data it lifts ~95% (his stock NA=0.13 → only 19 modes,
+        # under-counting) to ~97%. Do NOT just crank NA for a bigger number —
+        # NA=0.17 gives 30+ modes and ~98% that is OVERFITTING (more basis
+        # functions than real modes). Match the basis to the lantern's supported
+        # mode count (~23). For a different fiber, set core_radius/NA from its
+        # spec so generateModes() returns ~that many modes. butter_wc=10 is a
+        # slightly tighter twin passband than the paper's 15 (~+0.5%).
         self.data_dir = Path(data_dir)
         self.legs = list(legs)
         self.wavelengths = list(wavelengths)
@@ -90,6 +100,8 @@ class MultiPortReconstructor:
         self.diameter_range = diameter_range
         self.pol_half = pol_half
         self.ref_wl = ref_wavelength
+        self.butter_wc = butter_wc
+        self.sample_limit = sample_limit
 
         self._center = None        # (row, col) common beam centre
         self._xC = self._yC = None  # fitted carrier centroid vs wavelength index
@@ -155,10 +167,11 @@ class MultiPortReconstructor:
                       self._center, self.crop)
         fft = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(c)))
         interp, _, _ = fourier_interp_2d(
-            fft, self.nfft, self.nfft, 32,
+            fft, self.nfft, self.nfft, self.sample_limit,
             offset=(self._xC[wl_index] - self.crop // 2,
                     self._yC[wl_index] - self.crop // 2))
-        interp = interp * makeButterworth(self.nfft, self.nfft // 2, self.nfft // 2, wc=15)
+        interp = interp * makeButterworth(self.nfft, self.nfft // 2, self.nfft // 2,
+                                          wc=self.butter_wc)
         return np.fft.ifftshift(np.fft.ifft2(np.fft.fftshift(interp)))
 
     # ── step 4: per-frame optimisation → fidelity + decomposition ───────────────

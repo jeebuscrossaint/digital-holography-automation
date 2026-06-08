@@ -29,8 +29,9 @@ def test_multiport_beats_single_frame():
     # the cross-port averaging is real.
     R = MultiPortReconstructor(data_dir=CALEB, legs=range(19),
                                wavelengths=[1565, 1570, 1575])
+    assert R._modes().shape[1] == 23, "tuned basis should be the 23 modes the lantern supports"
     R.fit_carrier_centroids()
     r = R.reconstruct_frame(leg=10, wl_index=2)          # 1575 nm
-    assert r["fidelity"] > 0.93, (
-        f"multi-port fidelity {r['fidelity']:.3f} should exceed the single-frame "
-        f"~92% ceiling — the cross-port/sub-pixel path may be broken")
+    assert r["fidelity"] > 0.95, (
+        f"multi-port fidelity {r['fidelity']:.3f} should clear the tuned ~97% range "
+        f"(well above the single-frame ~92% ceiling) — the path may be broken")
