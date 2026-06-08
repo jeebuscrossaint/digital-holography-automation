@@ -87,6 +87,12 @@ class MultiPortReconstructor:
         # mode count (~23). For a different fiber, set core_radius/NA from its
         # spec so generateModes() returns ~that many modes. butter_wc=10 is a
         # slightly tighter twin passband than the paper's 15 (~+0.5%).
+        #
+        # THIS RIG's lantern is 7-PORT (8 modes) — when running on its own
+        # multi-port sweep, use core_radius=12e-6, NA=0.11 (Caleb's tutorial
+        # values → 8 modes), and size crop_size/nfft to the Bobcat 320 frame
+        # (256 px) rather than the 512/128 defaults (those fit the paper's
+        # 1024×1280 Lucid frames). Validate once real switch data exists.
         self.data_dir = Path(data_dir)
         self.legs = list(legs)
         self.wavelengths = list(wavelengths)
