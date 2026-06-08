@@ -82,6 +82,28 @@ def calculate_sideband_energy(image, quadrant=None, line_filter_width=5,
     return peak_mean / (bg_mean + 1e-12)
 
 
+def calculate_sideband_balance(image):
+    """Dual-polarization balance metric — the WEAKER of the two twin pairs.
+
+    A dual-polarization off-axis hologram has TWO carriers (one per reference
+    beam, at different tilt angles), so the FFT shows two twin pairs on the two
+    diagonals: one polarization's pair in UL/LR, the other's in UR/LL.
+    `calculate_sideband_energy(quadrant=1)` measures the UL pair's prominence
+    (polarization A), `quadrant=2` the UR pair's (polarization B).
+
+    Returning the MINIMUM of the two is the key: an optimizer that maximizes
+    this is forced to bring the WEAKER axis up — i.e. it BALANCES both
+    polarizations, instead of the plain `sideband` metric which just cranks the
+    single brightest peak and leaves one axis dead. Use method='balance' in the
+    polarization optimizer for a dual-pol lantern.
+
+    Returns (weaker, polA, polB) so callers can log the split / imbalance ratio.
+    """
+    a = calculate_sideband_energy(image, quadrant=1)   # UL  -> polarization A
+    b = calculate_sideband_energy(image, quadrant=2)   # UR  -> polarization B
+    return min(a, b), a, b
+
+
 def diagnose_fringe_metrics(image):
     """Compute every candidate metric on one frame so they can be compared
     empirically at the rig — turn the paddles and watch which one tracks
@@ -95,6 +117,12 @@ def diagnose_fringe_metrics(image):
         out["sideband"] = calculate_sideband_energy(image)   # carrier prominence (recommended)
     except Exception as e:
         out["sideband_error"] = str(e)
+    try:
+        weaker, a, b = calculate_sideband_balance(image)     # dual-pol: weaker axis
+        out["balance"] = weaker
+        out["polA"], out["polB"] = a, b
+    except Exception as e:
+        out["balance_error"] = str(e)
     return out
 
 
@@ -237,6 +265,11 @@ def check_fringes_visible(image, method='variance', threshold=0.15):
 
     elif method == 'sideband':
         metric = calculate_sideband_energy(image)
+        visible = metric > threshold
+
+    elif method == 'balance':
+        # Dual-pol: optimize the WEAKER twin pair so both axes come up together.
+        metric = calculate_sideband_balance(image)[0]
         visible = metric > threshold
 
     else:

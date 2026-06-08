@@ -69,7 +69,10 @@ class PolarizationTabMixin:
         self._pol_optimize_btn = QPushButton("Auto-optimize for fringes")
         self._pol_optimize_btn.setObjectName("Accent")
         self._pol_optimize_btn.clicked.connect(self._auto_optimize_polarization)
-        ctrl.addWidget(home_all); ctrl.addWidget(self._pol_optimize_btn); ctrl.addStretch(1)
+        self._pol_balance_btn = QPushButton("Balance (dual-pol)")
+        self._pol_balance_btn.clicked.connect(self._balance_polarization)
+        ctrl.addWidget(home_all); ctrl.addWidget(self._pol_optimize_btn)
+        ctrl.addWidget(self._pol_balance_btn); ctrl.addStretch(1)
         lay.addLayout(ctrl)
 
         self._pol_status_lbl = QLabel("Connect motors to enable controls.")
@@ -168,6 +171,14 @@ class PolarizationTabMixin:
             self._home_paddle(i)
 
     def _auto_optimize_polarization(self):
+        self._start_pol_optimize(method=None)      # None -> use config's check_method
+
+    def _balance_polarization(self):
+        # Dual-pol: bring BOTH polarization axes up together (maximise the
+        # weaker twin pair) instead of cranking the single brightest fringe.
+        self._start_pol_optimize(method="balance")
+
+    def _start_pol_optimize(self, method):
         if not self.motors:
             self._pol_status_lbl.setText("Motors not connected.")
             return
@@ -178,21 +189,25 @@ class PolarizationTabMixin:
             self._pol_status_lbl.setText("Stop the experiment first.")
             return
         self._pol_optimize_btn.setEnabled(False)
-        self._pol_status_lbl.setText("Sweeping paddles — this can take a minute…")
-        threading.Thread(target=self._auto_optimize_worker, daemon=True).start()
+        self._pol_balance_btn.setEnabled(False)
+        what = "Balancing both polarizations" if method == "balance" else "Sweeping paddles"
+        self._pol_status_lbl.setText(f"{what} — this can take a minute…")
+        threading.Thread(target=self._auto_optimize_worker, args=(method,), daemon=True).start()
 
-    def _auto_optimize_worker(self):
+    def _auto_optimize_worker(self, method=None):
         try:
             from fringe_detection import optimize_polarization_for_fringes
             fd = self.config.get("experiment", {}).get("fringe_detection", {})
+            method = method or fd.get("check_method", "variance")
+            label = "Balance" if method == "balance" else "Auto-optimize"
             success, metric, angles = optimize_polarization_for_fringes(
                 self.camera, self.motors,
                 max_attempts=int(fd.get("max_attempts", 30)),
-                method=fd.get("check_method", "variance"),
+                method=method,
                 threshold=float(fd.get("min_visibility", 0.15)))
             mark = "✓" if success else "⚠"
-            msg = (f"{mark} Auto-optimize: paddles={[round(a, 1) for a in angles]}, "
-                   f"metric={metric:.3f}"
+            msg = (f"{mark} {label}: paddles={[round(a, 1) for a in angles]}, "
+                   f"{'weaker-axis ' if method == 'balance' else ''}metric={metric:.3f}"
                    + ("" if success else f"  (below threshold {fd.get('min_visibility', 0.15)})"))
             self._post({"type": "log", "text": msg, "level": "OK" if success else "WARN"})
             self._post({"type": "pol_status", "text": msg})

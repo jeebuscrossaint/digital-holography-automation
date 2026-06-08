@@ -149,9 +149,10 @@ class ShellMixin:
         elif t == "pol_status":
             self._pol_status_lbl.setText(msg["text"])
         elif t == "pol_optimize_done":
-            # Back on the GUI thread: re-enable the button and refresh the
+            # Back on the GUI thread: re-enable the buttons and refresh the
             # paddle spin targets from the motors' real angles.
             self._pol_optimize_btn.setEnabled(True)
+            self._pol_balance_btn.setEnabled(True)
             self._sync_paddle_targets_from_hw()
 
     def _update_laser_power_readout(self, raw):
