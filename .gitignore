@@ -223,6 +223,15 @@ __marimo__/
 holography_data/
 *.npy
 
+# Large reference archives + their extracted contents (Caleb's paper datasets,
+# the Xeneth SDK, etc.) — multi-GB, kept locally, must never hit the remote.
+*.zip
+*.pptx
+*.mat
+*.spydata
+_caleb_ref/
+_scratch/
+
 # Processing results
 processed_results/
 *_results.npz
