@@ -26,9 +26,19 @@ class ShellMixin:
         try:
             import yaml
             with open(CONFIG_FILE) as f:
-                return yaml.safe_load(f) or {}
+                cfg = yaml.safe_load(f) or {}
         except Exception:
             return {}
+        # A single leg/wavelength can get saved as a scalar (the Config tab
+        # writes "1" as int 1, not a list) — which crashes every `for x in legs`
+        # loop. Coerce both back to lists so a one-element sweep is always safe.
+        exp = cfg.get("experiment")
+        if isinstance(exp, dict):
+            for key in ("legs", "wavelengths"):
+                v = exp.get(key)
+                if v is not None and not isinstance(v, (list, tuple)):
+                    exp[key] = [v]
+        return cfg
 
     # ── UI construction ──────────────────────────────────────────────────────
     def _build_ui(self):
