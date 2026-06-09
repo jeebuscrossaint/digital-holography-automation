@@ -260,8 +260,17 @@ class HolographyDataCollector:
                     else:
                         print(f"  ✓ Fringes visible!")
                 
-                # Save image
-                filename = filename_format.format(leg=leg, wavelength=wavelength)
+                # Save image — tolerate fractional wavelengths (the default
+                # {wavelength:04d} integer code crashes on e.g. 1525.1).
+                try:
+                    filename = filename_format.format(
+                        leg=leg,
+                        wavelength=int(wavelength) if float(wavelength).is_integer() else wavelength)
+                except (ValueError, KeyError):
+                    import re as _re
+                    _safe = _re.sub(r"\{wavelength[^}]*\}", "{wavelength}", filename_format)
+                    _tag = f"{float(wavelength):.4f}".rstrip("0").rstrip(".").replace(".", "p")
+                    filename = _safe.format(leg=leg, wavelength=_tag)
                 filepath = self.output_dir / filename
                 
                 np.save(filepath, frame)

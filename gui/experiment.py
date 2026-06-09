@@ -13,6 +13,26 @@ from PySide6.QtWidgets import QMessageBox
 from .runtime import CONFIG_FILE
 
 
+def format_capture_name(fmt: str, leg, wl) -> str:
+    """Build a save filename that tolerates fractional wavelengths.
+
+    Whole-number wavelengths use the configured format verbatim (e.g.
+    ``leg01-wavelength1525.npy`` — unchanged/backward compatible). A fractional
+    wavelength would crash the default ``{wavelength:04d}`` integer code, so we
+    fall back to a dot-free tag (``leg01-wavelength1525p1.npy``) — the 'p' keeps
+    the file extension clean. The true wavelength is always stored in the .yaml
+    metadata, so the filename is just a label."""
+    leg = int(leg)
+    try:
+        return fmt.format(leg=leg,
+                          wavelength=int(wl) if float(wl).is_integer() else wl)
+    except (ValueError, KeyError):
+        import re
+        safe = re.sub(r"\{wavelength[^}]*\}", "{wavelength}", fmt)
+        tag = f"{float(wl):.4f}".rstrip("0").rstrip(".").replace(".", "p")
+        return safe.format(leg=leg, wavelength=tag)
+
+
 class ExperimentMixin:
     def _start_experiment(self):
         if not self.hardware_connected:
@@ -194,7 +214,7 @@ class ExperimentMixin:
                                      f"exposure or laser power."),
                             "level": "WARN"})
 
-                    fname = fmt.format(leg=leg, wavelength=wl)
+                    fname = format_capture_name(fmt, leg, wl)
                     fpath = out / fname
                     np.save(fpath, frame)
 
