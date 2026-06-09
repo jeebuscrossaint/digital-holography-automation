@@ -56,8 +56,15 @@ class ConfigTabMixin:
         section("Experiment")
         legs = exp.get("legs", list(range(1, 8)))
         field("Legs", "experiment.legs", ",".join(map(str, legs)))
-        wls = exp.get("wavelengths", [1540, 1545, 1550, 1555, 1560, 1565, 1570])
-        field("Wavelengths (nm)", "experiment.wavelengths", ",".join(map(str, wls)))
+        # Wavelengths as a sweep — start / end / step (saved as a range, so you
+        # don't list every value). Defaults derived from the current sweep.
+        wls = exp.get("wavelengths") or [1525, 1575]
+        wl_start = wls[0]
+        wl_stop  = wls[-1]
+        wl_step  = (wls[1] - wls[0]) if len(wls) >= 2 else 5
+        field("Wavelength start (nm)", "_wl_start", wl_start)
+        field("Wavelength end (nm)",   "_wl_stop",  wl_stop)
+        field("Wavelength step (nm)",  "_wl_step",  wl_step)
         wt = exp.get("wait_times", {})
         field("Wait after leg switch (s)", "experiment.wait_times.after_leg_switch",
               wt.get("after_leg_switch", 1.0))
@@ -89,6 +96,8 @@ class ConfigTabMixin:
             cfg = {}
 
         for key_path, edit in self._cfg_widgets.items():
+            if key_path.startswith("_"):
+                continue                       # handled specially below
             raw = edit.text().strip()
             if "," in raw:
                 parts = [p.strip() for p in raw.split(",") if p.strip()]
@@ -106,6 +115,20 @@ class ConfigTabMixin:
             for k in keys[:-1]:
                 d = d.setdefault(k, {})
             d[keys[-1]] = val
+
+        # Wavelengths: write the start/end/step fields as a range dict; the
+        # loader expands it to the inclusive list every consumer iterates.
+        def _num(key, default):
+            t = self._cfg_widgets[key].text().strip()
+            try:
+                return float(t) if "." in t else int(t)
+            except ValueError:
+                return default
+        cfg.setdefault("experiment", {})["wavelengths"] = {
+            "start": _num("_wl_start", 1525),
+            "stop":  _num("_wl_stop", 1575),
+            "step":  _num("_wl_step", 5),
+        }
 
         with open(CONFIG_FILE, "w") as f:
             yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)

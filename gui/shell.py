@@ -29,16 +29,38 @@ class ShellMixin:
                 cfg = yaml.safe_load(f) or {}
         except Exception:
             return {}
-        # A single leg/wavelength can get saved as a scalar (the Config tab
-        # writes "1" as int 1, not a list) — which crashes every `for x in legs`
-        # loop. Coerce both back to lists so a one-element sweep is always safe.
+        # Normalize legs/wavelengths so downstream `for x in ...` loops are safe:
+        #  - a {start, stop, step} dict expands to an inclusive list (lets you
+        #    write a sweep as a range instead of listing every value);
+        #  - a bare scalar becomes a one-element list (the Config tab can save
+        #    "1" as int 1, which would otherwise crash every loop).
         exp = cfg.get("experiment")
         if isinstance(exp, dict):
             for key in ("legs", "wavelengths"):
                 v = exp.get(key)
-                if v is not None and not isinstance(v, (list, tuple)):
+                if isinstance(v, dict) and "start" in v and "stop" in v:
+                    exp[key] = self._expand_range(v)
+                elif v is not None and not isinstance(v, (list, tuple)):
                     exp[key] = [v]
         return cfg
+
+    @staticmethod
+    def _expand_range(spec: dict) -> list:
+        """Expand {start, stop, step} into an inclusive numeric list.
+        e.g. {start: 1525, stop: 1575, step: 5} -> [1525, 1530, ... 1575]."""
+        try:
+            start = float(spec["start"]); stop = float(spec["stop"])
+            step = abs(float(spec.get("step", 1) or 1)) or 1.0
+        except (TypeError, ValueError):
+            return []
+        if stop < start:
+            step = -step
+        n = int(round((stop - start) / step)) + 1
+        out = []
+        for i in range(max(n, 1)):
+            x = start + i * step
+            out.append(int(round(x)) if float(x).is_integer() else round(x, 4))
+        return out
 
     # ── UI construction ──────────────────────────────────────────────────────
     def _build_ui(self):
