@@ -67,7 +67,12 @@ class HolographyDataProcessor:
 
         # --- reconstruction settings (Dobias et al., Opt. Express 2026) ---
         # float() guards YAML reading e-notation as a string.
-        self._grid        = 100                                   # mode-grid resolution
+        # crop_size = the window (px) kept around the beam. This is the "zoom":
+        # too small and you crop the mode's outer structure off and cap fidelity
+        # (Caleb: "your image is still very zoomed in ... cropping something
+        # twice"). 200 px captures the full field on a 256-px frame and lifts
+        # fidelity ~92% -> ~96%. Clamped to the frame size at process time.
+        self._grid        = int(self.proc_config.get('crop_size', 200))
         self._core_radius = float(self.proc_config.get('core_radius', 1.7e-5))
         self._NA          = float(self.proc_config.get('numerical_aperture', 0.11))
         self._n_eff       = float(self.proc_config.get('effective_index', 1.453))
@@ -75,7 +80,8 @@ class HolographyDataProcessor:
         # Parameters optimized per-hologram to maximize fidelity (the paper
         # optimizes field position, mode-field diameter, and quadratic phase):
         self._lp_cuts = [22, 30, 40]                              # Butterworth cutoff (px)
-        self._fovs    = [round(v, 9) for v in np.arange(20e-6, 90e-6, 8e-6)]
+        # FOV scan widened to match the bigger window so the mode can fill it.
+        self._fovs    = [round(v, 9) for v in np.arange(20e-6, 130e-6, 10e-6)]
         self._phases  = np.arange(-3.0, 3.01, 0.5)               # quadratic-phase factor k
         self._mode_cache = {}
         self._opt_modes = None
@@ -141,32 +147,55 @@ class HolographyDataProcessor:
         data = np.load(filepath)
         return data
     
-    def process_single_hologram(self, hologram, wavelength_nm=1550, 
-                                show_plots=False, save_plots=False, 
-                                plot_prefix=''):
+    def process_single_hologram(self, hologram, wavelength_nm=1550,
+                                show_plots=False, save_plots=False,
+                                plot_prefix='', background=None, bg_modifier=1.0):
         """Process a single hologram image
-        
+
         Args:
             hologram: 2D array of hologram intensity
             wavelength_nm: Wavelength in nanometers
             show_plots: Whether to display plots
             save_plots: Whether to save plot images
             plot_prefix: Prefix for saved plot filenames
-            
+            background: optional reference/background frame (same shape) to
+                subtract before reconstruction — removes the low-frequency
+                beam envelope/oscillations (Caleb's tip). Capture it as the
+                reference beam alone, ideally one per wavelength.
+            bg_modifier: scale on the background subtraction (Caleb: "hopefully
+                it's 1").
+
         Returns:
             Dictionary with processing results
         """
         results = {}
 
+        hologram = np.asarray(hologram).astype(float)
+
+        # Optional background subtraction: field = frame - background*modifier.
+        # Kills the low-freq envelope that drags fidelity down. Background is
+        # wavelength-dependent, so pass the reference taken at THIS wavelength.
+        if background is not None:
+            bg = np.asarray(background, dtype=float)
+            if bg.shape == hologram.shape:
+                hologram = hologram - bg * float(bg_modifier)
+            else:
+                print(f"  [bg] skipped — background shape {bg.shape} != frame {hologram.shape}")
+
         # Center-crop to a square — Caleb's FFT helpers (filterDCComponents,
         # findCentroid, generateMask) assume a square frame, but the Bobcat
         # 320 is 320x256. Without this the DC mask can't broadcast.
-        hologram = np.asarray(hologram)
         h, w = hologram.shape[:2]
         if h != w:
             s = min(h, w)
             y0, x0 = (h - s) // 2, (w - s) // 2
             hologram = hologram[y0:y0 + s, x0:x0 + s]
+
+        # Clamp the crop window to the frame — the window can't be bigger than
+        # the (square) frame, or _center_on_beam's slice goes out of bounds.
+        if self._grid > hologram.shape[0]:
+            self._grid = hologram.shape[0]
+            self._mode_cache.clear()
 
         wl_m = float(wavelength_nm) * 1e-9
         results['fft_field'] = np.fft.fftshift(np.fft.fft2(hologram.astype(float)))

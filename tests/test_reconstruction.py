@@ -16,12 +16,16 @@ import pytest
 
 from conftest import FIXTURES
 
-# Pinned on 2026-06-05 against the committed fixture + locked deps (uv.lock).
-# If this changes, it should be because someone INTENDED to change the
-# reconstruction — update the constant in the same commit and say why.
-GOLDEN_FIDELITY = 0.9186
+# Pinned against the committed fixture + locked deps (uv.lock). If this changes,
+# it should be because someone INTENDED to change the reconstruction — update
+# the constant in the same commit and say why.
+# 2026-06-09: 0.9186 -> 0.9770 after widening the crop window (crop_size
+# 100 -> 200): the old 100-px window cropped the mode's outer structure off and
+# capped fidelity (Caleb's "still very zoomed in"). Bigger window captures the
+# full field. Grid 100 -> 200 to match.
+GOLDEN_FIDELITY = 0.9770
 FIDELITY_TOL    = 0.02      # absolute; FP/platform slack, still catches real breaks
-GRID            = 100       # processor's reconstruction grid size
+GRID            = 200       # processor's reconstruction grid size (= crop_size)
 
 
 @pytest.fixture(scope="module")
