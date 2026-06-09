@@ -90,6 +90,24 @@ class ExperimentMixin:
                 "text": f"Laser not connected — all {len(wls)} wavelengths will be saved at the current λ.",
                 "level": "WARN"})
 
+        # Auto-enable the laser before a (possibly walk-away) run, and CONFIRM it
+        # took — guards against the "booted up, hit Full, came back to a dead
+        # dataset because the laser was off all day" trap.
+        if self.laser:
+            try:
+                self.laser.outputState(True)
+                time.sleep(0.3)
+                on = "1" in str(self.laser.isOutputOn())
+                cb({"type": "log",
+                    "text": ("Laser output ON (auto-enabled for the run)" if on else
+                             "⚠ Laser would NOT confirm ON — check it before walking away, "
+                             "this run may capture dark frames"),
+                    "level": "OK" if on else "WARN"})
+            except Exception as e:
+                cb({"type": "log",
+                    "text": f"⚠ Couldn't enable laser output: {e} — check the laser",
+                    "level": "WARN"})
+
         cb({"type": "log",
             "text": f"Collection: {len(legs)} legs × {len(wls)} wavelengths = {total} images",
             "level": "INFO"})
