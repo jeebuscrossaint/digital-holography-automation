@@ -229,6 +229,7 @@ class ExperimentMixin:
 
         cb({"type": "log", "text": f"Found {len(files)} holograms", "level": "INFO"})
 
+        summary_rows = []
         for i, fpath in enumerate(files):
             if self.stop_event.is_set():
                 break
@@ -256,10 +257,28 @@ class ExperimentMixin:
                 cb({"type": "log",
                     "text": f"  ✓ Fidelity: {results['fidelity']:.4f}  [{powers_str}]",
                     "level": "OK"})
+                summary_rows.append({
+                    "filename": fpath.name,
+                    "wavelength_nm": int(wl),
+                    "fidelity": float(results["fidelity"]),
+                    "mode_powers": [float(p) for p in results["mode_powers"]],
+                })
             except Exception as e:
                 import traceback
                 cb({"type": "log", "text": f"  ✗ {e}", "level": "ERROR"})
                 cb({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
+
+        # Write the summary the Results tab reads (the GUI path never did this
+        # before, so Results was always empty after a run).
+        try:
+            from datetime import datetime as _dt
+            proc.results_dir.mkdir(parents=True, exist_ok=True)
+            with open(proc.results_dir / "processing_summary.yaml", "w") as f:
+                yaml.dump({"processing_date": _dt.now().isoformat(),
+                           "total_processed": len(summary_rows),
+                           "results": summary_rows}, f, sort_keys=False)
+        except Exception as e:
+            cb({"type": "log", "text": f"  (couldn't write results summary: {e})", "level": "DEBUG"})
 
         cb({"type": "progress", "percent": 100, "status": "Processing complete"})
         cb({"type": "log", "text": "Data processing complete", "level": "OK"})
