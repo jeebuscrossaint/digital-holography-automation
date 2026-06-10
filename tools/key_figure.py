@@ -21,7 +21,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "lib"))
+sys.path.insert(0, str(ROOT))           # repo root — for data_processing
+sys.path.insert(0, str(ROOT / "lib"))   # lib — for calebsUsefulFunctions
 from data_processing import HolographyDataProcessor, _butter_lp        # noqa: E402
 from calebsUsefulFunctions import normalizeIntensity, pltBoth          # noqa: E402
 
