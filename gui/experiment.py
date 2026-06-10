@@ -267,6 +267,19 @@ class ExperimentMixin:
 
         cb({"type": "log", "text": f"Found {len(files)} holograms", "level": "INFO"})
 
+        # Background subtraction (Caleb's tip): if enabled and a reference
+        # library exists, subtract the per-wavelength reference frame before
+        # reconstruction. Worth ~+0.4 pts fidelity. Off by default.
+        pcfg = self.config.get("processing", {})
+        bg_dir = pcfg.get("background_dir")
+        bg_mod = float(pcfg.get("background_modifier", 0.8))
+        subtract_bg = (bool(pcfg.get("subtract_background", False))
+                       and bg_dir and Path(bg_dir).exists())
+        if subtract_bg:
+            cb({"type": "log",
+                "text": f"Background subtraction ON (refs: {bg_dir}, modifier {bg_mod})",
+                "level": "INFO"})
+
         summary_rows = []
         for i, fpath in enumerate(files):
             if self.stop_event.is_set():
@@ -286,10 +299,20 @@ class ExperimentMixin:
                     with open(meta_f) as f:
                         wl = yaml.safe_load(f).get("wavelength_nm", 1550)
 
+                bg = None
+                if subtract_bg:
+                    bgp = Path(bg_dir) / fpath.name      # same filename in refs dir
+                    if bgp.exists():
+                        bg = proc.load_hologram(bgp)
+                    else:
+                        cb({"type": "log",
+                            "text": f"  (no reference for {fpath.name} — skipping bg)",
+                            "level": "DEBUG"})
+
                 results = proc.process_single_hologram(
                     hologram, wavelength_nm=wl,
                     show_plots=False, save_plots=True,
-                    plot_prefix=fpath.stem)
+                    plot_prefix=fpath.stem, background=bg, bg_modifier=bg_mod)
                 powers_str = " ".join(
                     f"{p*100:.1f}%" for p in results["mode_powers"][:5])
                 cb({"type": "log",
