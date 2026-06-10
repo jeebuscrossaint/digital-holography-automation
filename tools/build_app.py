@@ -42,6 +42,7 @@ def main():
         sys.executable, "-m", "PyInstaller",
         "--onefile", "--noconfirm", "--clean",
         "--name", "Digital Holography",
+        "--icon", str(ROOT / "gui" / "app_icon.ico"),
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build" / "app"),
         "--specpath", str(ROOT / "build" / "app"),
@@ -54,6 +55,9 @@ def main():
         *add_data("hardware", "hardware"),
         *add_data("lib", "lib"),
         *add_data("experiment_config.yaml", "."),
+        # app icon — bundled into gui/ so the window/taskbar icon resolves
+        *add_data("gui/app_icon.ico", "gui"),
+        *add_data("gui/app_icon.png", "gui"),
     ]
     if (ROOT / "vendor").exists():
         cmd += add_data("vendor", "vendor")

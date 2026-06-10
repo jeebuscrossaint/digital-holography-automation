@@ -9,11 +9,15 @@ replaces the old queue + ``after()`` polling pump, and is what makes the
 background hardware I/O safe without freezing the window."""
 
 import threading
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from . import runtime
+
+_ICON = str(Path(__file__).resolve().parent / "app_icon.ico")
 from .style import apply_theme
 from .shell import ShellMixin
 from .connection import ConnectionMixin
@@ -69,19 +73,30 @@ class HolographyApp(
 
         self._build_ui()
 
+        self.setWindowIcon(QIcon(_ICON))
+
         self._cam_first_frame_logged = False
-        threading.Thread(target=self._background_poller,   daemon=True).start()
-        threading.Thread(target=self._camera_preview_loop, daemon=True).start()
+        # Keep references so close() can wait for them to actually exit.
+        self._bg_thread  = threading.Thread(target=self._background_poller,   daemon=True)
+        self._cam_thread = threading.Thread(target=self._camera_preview_loop, daemon=True)
+        self._bg_thread.start()
+        self._cam_thread.start()
 
     def _post(self, msg: dict):
         """Thread-safe: hand a message dict to the GUI thread."""
         self._bridge.message.emit(msg)
 
     def closeEvent(self, event):
-        """Window close: stop experiment, disconnect hardware, then exit."""
+        """Window close (incl. Alt+F4): stop the background threads and WAIT for
+        them to exit BEFORE closing hardware. Otherwise a camera frame-grab in
+        flight collides with the camera close and jams the Xeneth SDK — it keeps
+        the handle, so the next launch can't connect (the reboot trap)."""
         self._stop_background.set()
         if self.experiment_running:
             self.stop_event.set()
+        for t in (getattr(self, "_bg_thread", None), getattr(self, "_cam_thread", None)):
+            if t is not None and t.is_alive():
+                t.join(timeout=2.5)        # let any in-flight grab finish first
         self._shutdown_hardware()
         event.accept()
 
@@ -90,6 +105,7 @@ def main():
     runtime.setup_logfile()
     app = QApplication([])
     apply_theme(app)
+    app.setWindowIcon(QIcon(_ICON))
     win = HolographyApp()
     win.show()
     app.exec()
