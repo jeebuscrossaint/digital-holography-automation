@@ -35,10 +35,14 @@ def format_capture_name(fmt: str, leg, wl) -> str:
 
 class ExperimentMixin:
     def _start_experiment(self):
-        if not self.hardware_connected:
-            QMessageBox.warning(self, "Not Connected", "Connect hardware first.")
-            return
         mode = self._selected_mode()
+        # Collection needs hardware; processing just reads existing .npy files,
+        # so allow it offline (e.g. reprocessing a dataset on a laptop).
+        if mode in ("collect", "full") and not self.hardware_connected:
+            QMessageBox.warning(self, "Not Connected",
+                                "Connect hardware first (collection needs the camera/laser). "
+                                "To reprocess existing data without hardware, use Process mode.")
+            return
         self.experiment_running = True
         self.stop_event.clear()
         self._start_btn.setEnabled(False)
@@ -372,11 +376,11 @@ class ExperimentMixin:
                 self._log(f"{summary}", "OK")
                 self._log(f"{missing} — plug in and click Connect to retry", "WARN")
 
-            self._start_btn.setEnabled(bool(ok))
+            self._start_btn.setEnabled(True)   # Process is always available; collect/full check hw at click
             if "Motors" in ok:
                 self._sync_paddle_targets_from_hw()
         elif event == "experiment":
-            self._start_btn.setEnabled(self.hardware_connected)
+            self._start_btn.setEnabled(True)
             if success:
                 self._progress_bar.setValue(100)
                 self._status_lbl.setText("Experiment complete!")

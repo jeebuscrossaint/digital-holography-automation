@@ -36,7 +36,7 @@ class RunTabMixin:
             ctrl.addWidget(rb)
         ctrl.addStretch(1)
         self._start_btn = QPushButton("Start Experiment"); self._start_btn.setObjectName("Accent")
-        self._start_btn.setEnabled(False)
+        self._start_btn.setEnabled(True)   # Process mode works offline; collect/full check hw at click
         self._start_btn.clicked.connect(self._start_experiment)
         self._stop_btn = QPushButton("Stop"); self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop_experiment)

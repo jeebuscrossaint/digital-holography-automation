@@ -205,6 +205,6 @@ class ConnectionMixin:
             self._set_hw_dot(dev, "disconnected")
         self._connect_btn.setEnabled(True)
         self._disconnect_btn.setEnabled(False)
-        self._start_btn.setEnabled(False)
+        self._start_btn.setEnabled(True)   # keep Process usable offline
         self._status_lbl.setText("Hardware disconnected")
         self._log("Hardware disconnected", "INFO")
