@@ -123,7 +123,8 @@ class HolographyDataProcessor:
         Y, X = np.mgrid[0:N, 0:N]
         demod = H * np.exp(-2j * np.pi * (u0 * X + v0 * Y))    # shift twin -> DC
         Sd = np.fft.fftshift(np.fft.fft2(demod)) * _butter_lp(N, lp_cut, lp_order)
-        return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx)
+        # Sd = the isolated sideband (the "FFT selection"); ES = its inverse FFT.
+        return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx), Sd
 
     def _center_on_beam(self, ES, size):
         """Crop a size×size window centered on the field's intensity centroid."""
@@ -212,7 +213,7 @@ class HolographyDataProcessor:
                        for pf in self._phases}
         best = None
         for lp in self._lp_cuts:
-            ES_full, centroid = self._recover_field(hologram, lp)
+            ES_full, centroid, sel = self._recover_field(hologram, lp)
             base = normalizeIntensity(self._center_on_beam(ES_full, grid))
             for fov in self._fovs:
                 modes = self._modes_at(fov, wl_m)
@@ -226,11 +227,14 @@ class HolographyDataProcessor:
                         best = dict(fidelity=fid, lp=lp, fov=fov, phase=float(pf),
                                     nm=nm, field=fld, recomp=normalizeIntensity(rec),
                                     decomp=dec, recovered_full=ES_full,
+                                    recovered_centered=base, selection=sel,
                                     centroid=centroid, modes=modes)
 
         self._opt_modes = best['modes']
         decomp = best['decomp']
         results['recovered_field'] = best['recovered_full']
+        results['recovered_centered'] = best['recovered_centered']  # for the key figure
+        results['fft_selection'] = best['selection']                # isolated sideband
         results['recovered_field_corrected'] = best['field']
         results['reconstructed_field'] = best['recomp']
         results['mode_decomposition'] = decomp
@@ -265,54 +269,53 @@ class HolographyDataProcessor:
             save: Save plots to file
             prefix: Filename prefix for saved plots
         """
-        # One consistent 3x4 grid (the old code mixed a 3x4 and a 3x6 grid,
-        # which made the LP-mode thumbnails draw on top of the bar chart).
+        # The reconstruction breakdown Caleb asked for, in one image (2x4):
+        #   1 original   2 FFT+carrier   3 FFT selection   4 recovered field
+        #   5 recovered + corrections (phase + bg)   6 recomposition + fidelity
+        #   7 LP01 reference   8 mode-power distribution
         modes = self._opt_modes if self._opt_modes is not None else []
-        fig = plt.figure(figsize=(16, 12))
+        recov = results.get('recovered_centered', results['recovered_field_corrected'])
+        fig = plt.figure(figsize=(16, 8))
 
-        # Row 1: hologram, FFT+twin, received field, recomposed field
-        ax = plt.subplot(3, 4, 1)
-        im = ax.imshow(hologram, cmap='gray')
-        ax.set_title('Original Hologram'); plt.colorbar(im, ax=ax, fraction=0.046)
+        ax = plt.subplot(2, 4, 1)
+        ax.imshow(hologram, cmap='gray'); ax.set_title('1. Original hologram')
+        ax.set_xticks([]); ax.set_yticks([])
 
-        ax = plt.subplot(3, 4, 2)
-        ax.imshow(np.log10(np.abs(results['fft_field']) + 1), cmap='viridis')
+        ax = plt.subplot(2, 4, 2)
+        ax.imshow(np.log10(np.abs(results['fft_field']) + 1), cmap='magma')
         c = results.get('twin_centroid')
         if c is not None:
-            ax.plot(c[1], c[0], 'rx', markersize=14, markeredgewidth=2)
-        ax.set_title('FFT (log) + twin')
+            ax.plot(c[1], c[0], 'cx', markersize=12, markeredgewidth=2)
+        ax.set_title('2. FFT (log) + carrier'); ax.set_xticks([]); ax.set_yticks([])
 
-        plt.subplot(3, 4, 3)
+        ax = plt.subplot(2, 4, 3)
+        sel = results.get('fft_selection')
+        if sel is not None:
+            ax.imshow(np.log10(np.abs(sel) + 1), cmap='magma')
+        ax.set_title('3. FFT selection (demod + Butterworth)')
+        ax.set_xticks([]); ax.set_yticks([])
+
+        plt.subplot(2, 4, 4)
+        pltBoth(recov); plt.title('4. iFFT recovered field (amp+phase)')
+
+        plt.subplot(2, 4, 5)
         pltBoth(results['recovered_field_corrected'])
-        plt.title('Received field (amp+phase)')
+        plt.title('5. iFFT + corrections (phase + bg)')
 
-        plt.subplot(3, 4, 4)
+        plt.subplot(2, 4, 6)
         pltBoth(results['reconstructed_field'])
-        plt.title(f"Recomposed  (η = {results['fidelity']*100:.1f}%)")
+        plt.title(f"6. Recomposition  (η = {results['fidelity']*100:.1f}%)")
 
-        # Row 2: amplitude, phase, mode-power bar
-        plt.subplot(3, 4, 5)
-        pltAbs(results['recovered_field_corrected'])
-        plt.title('Received amplitude')
+        plt.subplot(2, 4, 7)
+        if len(modes):
+            pltBoth(modes[0])
+        plt.title('7. LP01 mode (reference)')
 
-        plt.subplot(3, 4, 6)
-        pltAngle(results['recovered_field_corrected'])
-        plt.title('Received phase')
-
-        ax = plt.subplot(3, 4, 7)
+        ax = plt.subplot(2, 4, 8)
         mp = results['mode_powers']
         ax.bar(range(len(mp)), np.asarray(mp) * 100)
         ax.set_xlabel('LP mode'); ax.set_ylabel('Power (%)')
-        ax.set_title('Mode power distribution'); ax.grid(True, alpha=0.3)
-
-        # leave panel 8 empty as a spacer between the row and the mode gallery
-
-        # Row 3: first LP modes of the basis actually used
-        n_show = min(4, len(modes))
-        for i in range(n_show):
-            plt.subplot(3, 4, 9 + i)
-            pltBoth(modes[i])
-            plt.title(f'LP mode {i}', fontsize=9)
+        ax.set_title('8. Mode power distribution'); ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
         
