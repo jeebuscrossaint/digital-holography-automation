@@ -33,6 +33,41 @@ def format_capture_name(fmt: str, leg, wl) -> str:
         return safe.format(leg=leg, wavelength=tag)
 
 
+def read_paddle_angles(motors):
+    """Actual paddle positions read from the hardware. NOT motors.angles — that's
+    the last *commanded* angle and is stale ([0,0,0]) if the app didn't move the
+    paddles this session, so the saved metadata was wrong."""
+    if motors is None:
+        return [0.0, 0.0, 0.0]
+    out = []
+    for i in (1, 2, 3):
+        try:
+            out.append(round(float(motors.getPosition(i)), 2))
+        except Exception:
+            try:
+                out.append(round(float(motors.angles[i - 1]), 2))
+            except Exception:
+                out.append(0.0)
+    return out
+
+
+def save_preview_png(frame, path):
+    """Save a viewable 8-bit PNG of a raw frame (mean ± 3σ contrast stretch)."""
+    try:
+        import numpy as np
+        from PIL import Image
+        a = np.asarray(frame).astype(np.float32)
+        mu, sd = float(a.mean()), float(a.std())
+        if sd < 1e-6:
+            disp = np.full(a.shape, 128, np.uint8)
+        else:
+            lo, hi = mu - 3 * sd, mu + 3 * sd
+            disp = np.clip((a - lo) / max(hi - lo, 1e-6) * 255, 0, 255).astype(np.uint8)
+        Image.fromarray(disp, "L").save(str(path))
+    except Exception:
+        pass
+
+
 class ExperimentMixin:
     def _start_experiment(self):
         mode = self._selected_mode()
@@ -221,15 +256,14 @@ class ExperimentMixin:
                     fname = format_capture_name(fmt, leg, wl)
                     fpath = out / fname
                     np.save(fpath, frame)
+                    save_preview_png(frame, fpath.with_suffix(".png"))   # viewable pic
 
                     if cfg["data"]["save_metadata"]:
-                        try:
-                            angles = list(self.motors.angles)
-                        except Exception:
-                            angles = [0, 0, 0]
+                        angles = read_paddle_angles(self.motors)   # actual positions
                         meta = {"leg": leg, "wavelength_nm": wl,
                                 "timestamp": datetime.now().isoformat(),
-                                "motor_angles": angles,
+                                "polarizer_angles_deg": angles,
+                                "motor_angles": angles,            # back-compat key
                                 "saturated": bool(sat["saturated"]),
                                 "saturated_fraction": float(sat["fraction"]),
                                 "max_value": int(sat["max_value"]),
