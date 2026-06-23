@@ -43,7 +43,18 @@ class D700DiconSwitch:
             stopbits=1,
             timeout=timeout
         )
-        time.sleep(0.5)  # Allow hardware to stabilize
+        # The switch is driven through an Arduino relay (Caleb's
+        # BasicSerialCommunication.ino). Opening the port toggles DTR, which
+        # RESETS the Arduino — it reboots, prints "Goodnight moon!" and runs a
+        # startup handshake (~2 s) before it will accept commands. Waiting only
+        # 0.5 s meant commands hit it mid-boot (the "shaky" behaviour). Wait for
+        # the boot, then flush the handshake text so it doesn't pollute the
+        # first real response.
+        time.sleep(2.0)
+        try:
+            self.ser.reset_input_buffer()
+        except Exception:
+            pass
         self.current_position = None
         print(f"Connected to Dicon switch on {port}")
     
@@ -76,11 +87,12 @@ class D700DiconSwitch:
         return position
 
     def identify(self):
-        """Query the device ID ('ID?'). Returns the response, or '' if the
-        switch doesn't answer — an empty reply means nothing is really
-        talking on this port (wrong device/baud, or switch powered off),
-        even though the serial port opened fine."""
-        return self.send_command("ID?")
+        """Query the device ID. The switch answers the SCPI-style '*idn?'
+        (NOT 'ID?') — using the wrong query is why this used to report 'no ID'
+        even on a healthy connection (per Caleb's FiberSwitch.py: info() sends
+        '*idn?'). An empty reply still means nothing is really answering (wrong
+        port/baud or powered off), even though the serial port opened fine."""
+        return self.send_command("*idn?", read_bytes=64, wait=0.3)
 
     def get_position(self, module=1):
         """Query current position of switch module.
