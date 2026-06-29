@@ -103,17 +103,24 @@ class ShellMixin:
 
         self._hw_dots: dict = {}
         self._hw_status_labels: dict = {}
+        self._hw_connect_btns: dict = {}
         for name in ("Laser", "Camera", "Switch", "Motors"):
             dot = QLabel("●"); dot.setStyleSheet(f"color:{MUTED}; font-size:12pt")
-            nm  = QLabel(f" {name} ")
+            # The device name is a flat button: click it to connect ONLY that
+            # device. Lets you drive e.g. the switch + laser from the app while
+            # Xeneth keeps the camera (GigE needs a single owner of the stream).
+            nm  = QPushButton(name); nm.setFlat(True)
+            nm.setToolTip(f"Connect only the {name.lower()}")
+            nm.clicked.connect(lambda _checked=False, d=name: self._connect_hardware([d]))
             st  = QLabel("Offline"); st.setObjectName("Small")
             bar.addWidget(dot); bar.addWidget(nm); bar.addWidget(st); bar.addSpacing(12)
             self._hw_dots[name.lower()] = dot
             self._hw_status_labels[name.lower()] = st
+            self._hw_connect_btns[name.lower()] = nm
 
         bar.addStretch(1)
         self._connect_btn = QPushButton("Connect All"); self._connect_btn.setObjectName("Accent")
-        self._connect_btn.clicked.connect(self._connect_hardware)
+        self._connect_btn.clicked.connect(lambda: self._connect_hardware())
         self._disconnect_btn = QPushButton("Disconnect"); self._disconnect_btn.setEnabled(False)
         self._disconnect_btn.clicked.connect(self._disconnect_hardware)
         bar.addWidget(self._connect_btn); bar.addWidget(self._disconnect_btn)

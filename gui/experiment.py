@@ -391,9 +391,15 @@ class ExperimentMixin:
             ok    = getattr(self, "_connected_names", [])
             all_4 = ("Laser", "Camera", "Switch", "Motors")
             off   = [d for d in all_4 if d not in ok]
+            connected_lower = {d.lower() for d in ok}
 
-            self._connect_btn.setEnabled(False)
-            self._disconnect_btn.setEnabled(True)
+            # Keep connect controls usable so more devices can be added; a
+            # device's own button greys out once it's connected. Disconnect is
+            # available whenever anything is connected.
+            self._connect_btn.setEnabled(len(ok) < 4)
+            for name, b in getattr(self, "_hw_connect_btns", {}).items():
+                b.setEnabled(name not in connected_lower)
+            self._disconnect_btn.setEnabled(len(ok) > 0)
 
             if len(ok) == 4:
                 self._status_lbl.setText("All 4 devices connected — ready to run")
@@ -401,8 +407,6 @@ class ExperimentMixin:
             elif len(ok) == 0:
                 self._status_lbl.setText("No devices connected — check cables & config")
                 self._log("No devices connected. Check cables, COM ports, and GPIB address.", "ERROR")
-                self._connect_btn.setEnabled(True)
-                self._disconnect_btn.setEnabled(False)
             else:
                 summary = f"{len(ok)}/4 connected: {', '.join(ok)}"
                 missing = f"Offline: {', '.join(off)}"

@@ -10,12 +10,20 @@ from .diagnostics import friendly_error
 
 
 class ConnectionMixin:
-    def _connect_hardware(self):
-        self._connect_btn.setEnabled(False)
-        self._log("Connecting to hardware…", "INFO")
-        threading.Thread(target=self._connect_worker, daemon=True).start()
+    _ALL_DEVICES = ("Laser", "Camera", "Switch", "Motors")
 
-    def _connect_worker(self):
+    def _connect_hardware(self, devices=None):
+        """Connect the named devices (default: all). Pass e.g. ['Switch'] to
+        connect just one — so you can drive the switch/laser from the app while
+        Xeneth keeps sole ownership of the camera's GigE stream."""
+        devices = [d for d in self._ALL_DEVICES if (not devices) or d in devices]
+        self._connect_btn.setEnabled(False)
+        for b in getattr(self, "_hw_connect_btns", {}).values():
+            b.setEnabled(False)
+        self._log(f"Connecting: {', '.join(devices)}…", "INFO")
+        threading.Thread(target=self._connect_worker, args=(devices,), daemon=True).start()
+
+    def _connect_worker(self, devices):
         ok: list[str] = []
         fail: list[str] = []
         lock = threading.Lock()
@@ -25,17 +33,18 @@ class ConnectionMixin:
         def record_fail(name):
             with lock: fail.append(name)
 
-        threads = [
-            threading.Thread(target=self._connect_laser,  args=(record_ok, record_fail), daemon=True),
-            threading.Thread(target=self._connect_camera, args=(record_ok, record_fail), daemon=True),
-            threading.Thread(target=self._connect_switch, args=(record_ok, record_fail), daemon=True),
-            threading.Thread(target=self._connect_motors, args=(record_ok, record_fail), daemon=True),
-        ]
+        fns = {"Laser": self._connect_laser, "Camera": self._connect_camera,
+               "Switch": self._connect_switch, "Motors": self._connect_motors}
+        threads = [threading.Thread(target=fns[d], args=(record_ok, record_fail), daemon=True)
+                   for d in devices if d in fns]
         for t in threads: t.start()
         for t in threads: t.join()
 
-        self._connected_names = ok
-        self.hardware_connected = len(ok) > 0
+        # Accumulate across per-device connects: keep already-connected devices,
+        # add the ones that just succeeded, drop any that just failed.
+        connected = (set(getattr(self, "_connected_names", [])) | set(ok)) - set(fail)
+        self._connected_names = [d for d in self._ALL_DEVICES if d in connected]
+        self.hardware_connected = len(self._connected_names) > 0
         self._post({"type": "done", "event": "connect", "success": True})
 
     def _emit(self, text, level="INFO"):
@@ -204,10 +213,13 @@ class ConnectionMixin:
 
         self.laser = self.camera = self.switch = self.motors = None
         self.hardware_connected = False
+        self._connected_names = []
 
         for dev in self._hw_dots:
             self._set_hw_dot(dev, "disconnected")
         self._connect_btn.setEnabled(True)
+        for b in getattr(self, "_hw_connect_btns", {}).values():
+            b.setEnabled(True)
         self._disconnect_btn.setEnabled(False)
         self._start_btn.setEnabled(True)   # keep Process usable offline
         self._status_lbl.setText("Hardware disconnected")
