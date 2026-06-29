@@ -177,21 +177,18 @@ class D700DiconSwitch:
             return self._probe(self.ser)
 
     def get_position(self, module=1):
-        """Query current position of switch module.
+        """Current switch position.
 
-        The GP700 is driven open-loop (set with 'i{m} {ch}', no readback is
-        relied on). If it doesn't answer the query we just return the last
-        commanded position — quietly, so we don't spam the log.
+        Driven open-loop. The Arduino relay mangles longer replies, so querying
+        'i{m}?' and scraping digits out of the response yields NOISE — that's
+        what made the GUI readout flicker (20 -> 30 -> 20...). So we just report
+        the last commanded position: the stable, truthful value. (Pass via the
+        Move button / move_to_position to set it.)
 
         Returns:
-            Current position as integer (or last known).
+            Last commanded position as integer, or None if nothing commanded yet.
         """
-        with self._lock:
-            response = self.send_command(f"i{module}?")
-            digits = ''.join(ch for ch in response if ch.isdigit())
-            if digits:
-                self.current_position = int(digits)
-            return self.current_position
+        return self.current_position
     
     def close(self):
         """Close serial connection"""
