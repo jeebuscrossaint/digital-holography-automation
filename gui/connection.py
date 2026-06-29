@@ -115,8 +115,12 @@ class ConnectionMixin:
         try:
             from D700DiconSwitch import D700DiconSwitch
             self.switch = D700DiconSwitch(port=port, baudrate=cfg_s.get("baudrate", 9600))
+            actual_port = getattr(self.switch, "port", port)
             self._hw("switch", "connected")
-            self._emit(f"✓ Switch  Dicon GP700  {port}", "OK")
+            if actual_port != port:
+                self._emit(f"  (auto-detected switch on {actual_port}, not "
+                           f"configured {port})", "INFO")
+            self._emit(f"✓ Switch  Dicon GP700  {actual_port}", "OK")
             # Confirm the device actually talks back (opening proves nothing).
             try:
                 ident = self.switch.identify() if hasattr(self.switch, "identify") else ""

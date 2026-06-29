@@ -10,7 +10,7 @@ hardware:
     model: Bobcat 320 GigE
     interface: GigE Vision (Ethernet-to-USB adapter)
   fiber_switch:
-    port: COM3
+    port: COM4
     baudrate: 9600
     module: 1
   polarization_motors:
@@ -21,40 +21,21 @@ hardware:
     - 0
     - 0
 experiment:
-  legs:
-  - 1
-  - 2
-  - 3
-  - 4
-  - 5
-  - 6
-  - 7
+  legs: 1
   wavelengths:
-  - 1540
-  - 1545
-  - 1550
-  - 1555
-  - 1560
-  - 1565
-  - 1570
+    start: 1525
+    stop: 1530
+    step: 1
   wait_times:
     after_leg_switch: 1.0
     after_wavelength_change: 0.5
     after_polarization_adjust: 0.3
   fringe_detection:
-    enabled: true
-    # 'sideband' metric is carrier-to-background prominence: ~40 for noise,
-    # ~600-13000 for clear fringes (calibrated from real frames 2026-06-04).
-    # 200 sits well above noise and below even weak fringes. Watch the live
-    # "metrics: sideband=..." values and tune if your fringes read differently.
+    enabled: false
     min_visibility: 200
     max_attempts: 60
     check_method: sideband
   validation:
-    # A hologram is invalid if fringe peaks clip the ADC (Mono16 full scale =
-    # 65535): clipping distorts the FFT sideband. Frame is flagged if more
-    # than max_saturated_fraction of pixels reach saturation_level. Confirm
-    # the exact cutoff with Caleb.
     saturation_level: 65535
     max_saturated_fraction: 0.001
   polarization:
@@ -65,23 +46,22 @@ experiment:
     - 0
     - 160
 data:
-  output_dir: ./holography_data
+  output_dir: ./holography_collection_only/
   filename_format: leg{leg:02d}-wavelength{wavelength:04d}.npy
   save_metadata: true
 processing:
   image_size:
   - 320
   - 256
-  crop_size: 100
-  # num_modes: how many LP modes to decompose into (paper's 19-port lantern
-  # supports ~23). core_radius is the MMF core RADIUS (paper: 34 um core dia
-  # -> 17 um radius). The reconstruction also auto-scans field-of-view to
-  # match the mode-field diameter to the image, so these are starting points.
+  crop_size: 200
   num_modes: 18
-  core_radius: 1.7e-5
+  subtract_background: true
+  background_dir: ./holography_data/references
+  background_modifier: 0.8
+  core_radius: 1.7e-05
   numerical_aperture: 0.11
   effective_index: 1.453
-  pixel_size: 7.0e-5
+  pixel_size: 7.0e-05
   quadratic_phase_correction: true
   phase_factor_range:
   - -2
