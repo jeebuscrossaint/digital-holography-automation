@@ -95,7 +95,14 @@ class D700DiconSwitch:
         """Return (open_serial, port_name). Tries the preferred port, then the
         other USB-serial ports. Prefers one that answers the ID handshake;
         falls back to the first that merely opens (the rig usually has a single
-        USB-serial device, so that's the switch)."""
+        USB-serial device, so that's the switch).
+
+        The configured port is just a hint: pass None/""/"auto"/"any" to skip
+        straight to scanning, so the config value can be anything (or nothing)
+        and the switch is still found wherever it enumerated."""
+        if isinstance(preferred, str) and preferred.strip().lower() in (
+                "", "auto", "any", "scan"):
+            preferred = None
         candidates = []
         if preferred:
             candidates.append(preferred)

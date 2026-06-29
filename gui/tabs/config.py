@@ -48,8 +48,8 @@ class ConfigTabMixin:
               hw.get("camera", {}).get("url", "cam://0"))
         field("Camera exposure (µs)",      "hardware.camera.exposure_time",
               hw.get("camera", {}).get("exposure_time", 500))
-        field("Fiber switch COM port",     "hardware.fiber_switch.port",
-              hw.get("fiber_switch", {}).get("port", "COM6"))
+        field("Fiber switch port (or 'auto')", "hardware.fiber_switch.port",
+              hw.get("fiber_switch", {}).get("port", "auto"))
         field("Motor serial number",       "hardware.polarization_motors.serial_number",
               hw.get("polarization_motors", {}).get("serial_number", "38394984"))
 

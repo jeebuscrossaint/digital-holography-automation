@@ -22,7 +22,7 @@ class SwitchTabMixin:
         self._switch_pos_cur_lbl = QLabel("—"); self._switch_pos_cur_lbl.setObjectName("BigReadout")
         ph.addWidget(self._switch_pos_cur_lbl); ph.addSpacing(16)
         ph.addWidget(QLabel("Go to leg"))
-        self._switch_pos_spin = QSpinBox(); self._switch_pos_spin.setRange(1, 16)
+        self._switch_pos_spin = QSpinBox(); self._switch_pos_spin.setRange(1, 999)
         self._switch_pos_spin.setValue(1)
         ph.addWidget(self._switch_pos_spin)
         mv = QPushButton("Move"); mv.setObjectName("Accent")
@@ -31,7 +31,11 @@ class SwitchTabMixin:
         lay.addWidget(pos)
 
         quick = QGroupBox("Quick select"); qh = QHBoxLayout(quick)
+        # 'legs' may be a list of leg numbers or a scalar count (config drift) —
+        # normalize either to a list so the quick buttons never crash.
         legs = self.config.get("experiment", {}).get("legs", list(range(1, 8)))
+        if isinstance(legs, int):
+            legs = list(range(1, legs + 1))
         for leg in legs:
             b = QPushButton(f"Leg {leg}")
             b.clicked.connect(lambda _checked=False, l=leg: self._switch_to_leg(l))

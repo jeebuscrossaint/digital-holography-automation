@@ -10,7 +10,7 @@ hardware:
     model: Bobcat 320 GigE
     interface: GigE Vision (Ethernet-to-USB adapter)
   fiber_switch:
-    port: COM4
+    port: auto          # 'auto' (or a COMx hint) — the driver finds the switch wherever it enumerates
     baudrate: 9600
     module: 1
   polarization_motors:
