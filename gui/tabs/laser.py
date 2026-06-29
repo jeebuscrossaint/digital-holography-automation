@@ -39,7 +39,7 @@ class LaserTabMixin:
         self._laser_pw_cur_lbl = QLabel("—"); self._laser_pw_cur_lbl.setObjectName("BigReadout")
         pwh.addWidget(self._laser_pw_cur_lbl); pwh.addWidget(QLabel("µW")); pwh.addSpacing(16)
         pwh.addWidget(QLabel("Target"))
-        self._laser_pw_spin = QDoubleSpinBox(); self._laser_pw_spin.setRange(50, 500)
+        self._laser_pw_spin = QDoubleSpinBox(); self._laser_pw_spin.setRange(50, 1499)
         self._laser_pw_spin.setDecimals(0); self._laser_pw_spin.setSingleStep(10)
         self._laser_pw_spin.setValue(208)
         self._laser_pw_target_init = False
