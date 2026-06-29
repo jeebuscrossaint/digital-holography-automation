@@ -8,6 +8,7 @@ Dicon GP700 Fiber Switch Driver
 Based on Dicon GP700 Manual
 """
 
+import threading
 import time
 import serial
 import serial.tools.list_ports
@@ -47,6 +48,14 @@ class D700DiconSwitch:
         self.baudrate = baudrate
         self.timeout = timeout
         self.current_position = None
+        # One reentrant lock guards ALL serial access. The GUI drives the switch
+        # from two threads — the Move worker (move_to_position) and the
+        # background status poll (get_position) — on the same pyserial port. With
+        # no lock their reset_input_buffer/write calls interleave and corrupt the
+        # bytes on the wire, so the switch ignores the command (the "click Move
+        # ~10 times before it takes" bug). RLock (not Lock) because get_position
+        # calls send_command, which re-acquires it on the same thread.
+        self._lock = threading.RLock()
         self.ser, self.port = self._connect(port, auto_detect)
         print(f"Connected to Dicon switch on {self.port}")
 
@@ -129,10 +138,11 @@ class D700DiconSwitch:
         The GP700 wants the command bytes with NO line terminator (matching
         Caleb's working driver). Returns the decoded response string.
         """
-        self.ser.reset_input_buffer()
-        self.ser.write(cmd.encode())
-        time.sleep(wait)
-        return self.ser.read(read_bytes).decode(errors='ignore').strip()
+        with self._lock:
+            self.ser.reset_input_buffer()
+            self.ser.write(cmd.encode())
+            time.sleep(wait)
+            return self.ser.read(read_bytes).decode(errors='ignore').strip()
 
     def move_to_position(self, module, position):
         """Move switch module to specified position.
@@ -144,18 +154,20 @@ class D700DiconSwitch:
         Returns:
             The position set.
         """
-        self.ser.reset_input_buffer()
-        self.ser.write(f"i{module} {position}".encode())   # GP700: lowercase, no terminator
-        self.current_position = position
-        print(f"Switched to leg {position}")
-        time.sleep(0.3)  # settling time for the optical path
+        with self._lock:
+            self.ser.reset_input_buffer()
+            self.ser.write(f"i{module} {position}".encode())  # lowercase, no terminator
+            self.current_position = position
+            print(f"Switched to leg {position}")
+            time.sleep(0.3)  # settling time for the optical path
         return position
 
     def identify(self):
         """Query the device ID (tries '*idn?' then 'ID?', since firmware differs
         on which it answers). An empty reply means the port opened but nothing
         is really answering (wrong device/baud or powered off)."""
-        return self._probe(self.ser)
+        with self._lock:
+            return self._probe(self.ser)
 
     def get_position(self, module=1):
         """Query current position of switch module.
@@ -167,17 +179,19 @@ class D700DiconSwitch:
         Returns:
             Current position as integer (or last known).
         """
-        response = self.send_command(f"i{module}?")
-        digits = ''.join(ch for ch in response if ch.isdigit())
-        if digits:
-            self.current_position = int(digits)
-        return self.current_position
+        with self._lock:
+            response = self.send_command(f"i{module}?")
+            digits = ''.join(ch for ch in response if ch.isdigit())
+            if digits:
+                self.current_position = int(digits)
+            return self.current_position
     
     def close(self):
         """Close serial connection"""
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-            print("Dicon switch disconnected")
+        with self._lock:
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+                print("Dicon switch disconnected")
     
     def __del__(self):
         """Cleanup on deletion"""
