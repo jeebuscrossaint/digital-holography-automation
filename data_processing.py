@@ -37,16 +37,9 @@ from calebsUsefulFunctions import (
     generateModes, findCentroid, cropArray, filterDCComponents,
     generatePhaseMask, applyQuadraticPhase, modeDecomp,
     combinedOutput, normalizeIntensity, overlap2FieldsV2,
-    decompAndRecomp, findBestOffset
+    decompAndRecomp, findBestOffset,
+    generateMask, makeButterworth, getMaxIndex,
 )
-
-
-def _butter_lp(N, D0, order=4):
-    """Butterworth low-pass mask (centered), used to isolate the demodulated
-    twin from DC and noise (Opt. Express 2026 uses a Butterworth filter)."""
-    y, x = np.ogrid[:N, :N]
-    r = np.hypot(y - N // 2, x - N // 2)
-    return 1.0 / (1.0 + (r / D0) ** (2 * order))
 
 
 class HolographyDataProcessor:
@@ -97,32 +90,38 @@ class HolographyDataProcessor:
                 NA=self._NA, wavelength=wavelength, rIndex=self._n_eff)
         return self._mode_cache[key]
 
-    def _recover_field(self, hologram, lp_cut, lp_order=4, dc_radius=18):
-        """Off-axis recovery (Opt. Express 2026, Sec. 2): FFT the raw intensity,
-        locate the twin sideband sub-pixel, demodulate it to DC, Butterworth
-        low-pass to isolate it, IFFT to the complex field. Returns (ES, centroid).
-        NOTE: FFT the intensity directly — do NOT sqrt it (that was the old bug)."""
+    def _recover_field(self, hologram, lp_cut, lp_order=4, dc_diameter=40):
+        """Off-axis recovery (Dobias et al., Opt. Express 2026, Sec. 2): FFT the
+        raw intensity, locate the twin sideband sub-pixel, demodulate it to DC,
+        Butterworth low-pass to isolate it, IFFT to the complex field. Returns
+        (ES, centroid, selection).
+        NOTE: FFT the intensity directly — do NOT sqrt it (that was an old bug).
+
+        Carrier location uses Caleb's VERIFIED recipe (the same one
+        multiport_reconstruction.fit_carrier_centroids uses per frame):
+        filterDCComponents (zeros the on-axis DC *cross* AND a center disk) ->
+        disk-blur -> makeButterworth-weighted sub-pixel center_of_mass. The old
+        code took a raw argmax just outside an 18-px disk; on low-contrast frames
+        the residual DC skirt outshone the true sideband, so it locked onto DC and
+        demodulated around it -> ~1% fidelity garbage (e.g. 1525 nm, 1550 nm)."""
         H = hologram.astype(float)
         N = H.shape[0]
-        P = np.abs(np.fft.fftshift(np.fft.fft2(H)))
+        F = np.fft.fftshift(np.fft.fft2(H))
         cy, cx = N // 2, N // 2
-        yy, xx = np.ogrid[:N, :N]
-        Pm = P.copy()
-        Pm[np.hypot(yy - cy, xx - cx) <= dc_radius] = 0       # mask DC to find carrier
-        py, px = np.unravel_index(int(Pm.argmax()), Pm.shape)
-        w = 6                                                  # sub-pixel refine
-        # Clamp the window to the array — if the carrier is within w px of an
-        # edge, negative slice indices would wrap to the far edge and give a
-        # bogus centroid (wrong carrier freq -> wrong reconstruction).
-        y0, y1 = max(py - w, 0), min(py + w + 1, N)
-        x0, x1 = max(px - w, 0), min(px + w + 1, N)
-        sub = Pm[y0:y1, x0:x1]
-        dy, dx = ndimage.center_of_mass(sub)
-        cyy, cxx = y0 + dy, x0 + dx
+        # Kill the DC cross + center disk, blur, then pick the brightest lobe
+        # (the off-axis sideband). getMaxIndex returns (row, col).
+        Pdc = filterDCComponents(np.abs(F).astype(float), 1, dc_diameter)
+        blur = signal.convolve2d(Pdc, generateMask(15, 15), mode='same')
+        pky, pkx = getMaxIndex(blur)
+        # Butterworth-weight around that lobe and take the sub-pixel centroid
+        # (makeButterworth's center is (X=col, Y=row) -> pass (pkx, pky)).
+        bw = makeButterworth(N, pkx, pky, wc=15)
+        cyy, cxx = ndimage.center_of_mass(blur * bw)
         u0, v0 = (cxx - cx) / N, (cyy - cy) / N               # carrier freq (cyc/px)
         Y, X = np.mgrid[0:N, 0:N]
         demod = H * np.exp(-2j * np.pi * (u0 * X + v0 * Y))    # shift twin -> DC
-        Sd = np.fft.fftshift(np.fft.fft2(demod)) * _butter_lp(N, lp_cut, lp_order)
+        Sd = np.fft.fftshift(np.fft.fft2(demod)) * makeButterworth(
+            N, cx, cy, wc=lp_cut, n=lp_order)                 # verified Butterworth
         # Sd = the isolated sideband (the "FFT selection"); ES = its inverse FFT.
         return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx), Sd
 
