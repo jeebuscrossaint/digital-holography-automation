@@ -339,16 +339,31 @@ def optimize_polarization_for_fringes(camera, pol_motors, max_attempts=60,
     attempts = 0
     stop = False
 
-    for step in (angle_step, max(angle_step // 2, 5)):   # coarse, then fine
-        grid = np.arange(0.0, max_travel + 1e-9, step)
+    # Coordinate ascent: ONE coarse full-travel sweep per paddle to find the
+    # basin, then LOCAL +/- refinement passes with a shrinking step until the
+    # angles stop moving (converged) or the frame budget runs out. The old code
+    # did two blind full-travel sweeps with no convergence check, so a paddle
+    # could get parked at the 0/160 boundary. Now a paddle only ends at a
+    # boundary if the metric genuinely peaks there.
+    step = float(angle_step)
+    coarse = True
+    while not stop and attempts < max_attempts and step >= 1.0:
+        improved = False
         for p in paddles:
-            local_best_ang = current[p]
-            local_best_metric = best_metric
-            for ang in grid:
+            base = current[p]
+            if coarse:
+                cands = list(np.arange(0.0, max_travel + 1e-9, step))
+            else:
+                cands = [base - step, base + step]      # local neighbours only
+            local_best_ang, local_best_metric = base, best_metric
+            for ang in cands:
+                ang = float(min(max(ang, 0.0), max_travel))
+                if not coarse and abs(ang - base) < 1e-9:
+                    continue
                 if attempts >= max_attempts:
                     stop = True
                     break
-                pol_motors.moveMotor(p, float(ang))
+                pol_motors.moveMotor(p, ang)
                 m = measure()
                 attempts += 1
                 if m is None:
@@ -357,16 +372,21 @@ def optimize_polarization_for_fringes(camera, pol_motors, max_attempts=60,
                       f"-> {method}={m:.4f}")
                 if m > local_best_metric:
                     local_best_metric = m
-                    local_best_ang = float(ang)
+                    local_best_ang = ang
             # Lock this paddle at its best before moving to the next.
             current[p] = local_best_ang
             pol_motors.moveMotor(p, local_best_ang)
-            if local_best_metric > best_metric:
+            if local_best_metric > best_metric + 1e-12:
                 best_metric = local_best_metric
+                improved = True
             if stop:
                 break
-        if stop or best_metric >= threshold:
+        if best_metric >= threshold:
             break
+        if coarse:
+            coarse = False              # basin found -> switch to local refine
+        elif not improved:
+            step /= 2.0                 # converged at this step -> go finer
 
     # Leave every paddle at its best-found angle.
     for p in paddles:
