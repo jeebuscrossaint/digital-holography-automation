@@ -315,9 +315,31 @@ class ExperimentMixin:
         bg_mod = float(pcfg.get("background_modifier", 0.8))
         subtract_bg = (bool(pcfg.get("subtract_background", False))
                        and bg_dir and Path(bg_dir).exists())
+        # Index the reference library by wavelength so a fine (e.g. 0.1 nm)
+        # library can be reused for a data sweep at ANY step — we pick the
+        # nearest-wavelength reference instead of requiring an exact filename
+        # match. References are leg-independent (reference beam doesn't pass
+        # through the lantern), so we key on wavelength only.
+        ref_index = {}
         if subtract_bg:
+            def _wl_of(name):
+                # filenames encode a fractional λ as 1547p3 (not 1547.3), so the
+                # token is digits + optional 'p' + digits — no literal dot, or the
+                # regex would swallow the '.npy' extension's dot.
+                m = re.search(r"wavelength(\d+(?:p\d+)?)", name)
+                if not m:
+                    return None
+                try:
+                    return float(m.group(1).replace("p", "."))
+                except ValueError:
+                    return None
+            for rp in Path(bg_dir).glob("*.npy"):
+                w = _wl_of(rp.name)
+                if w is not None:
+                    ref_index[w] = rp
             cb({"type": "log",
-                "text": f"Background subtraction ON (refs: {bg_dir}, modifier {bg_mod})",
+                "text": f"Background subtraction ON — {len(ref_index)} reference "
+                        f"wavelengths in {bg_dir} (modifier {bg_mod}, nearest-λ match)",
                 "level": "INFO"})
 
         # Auto-select reconstruction method by leg count. A MULTI-LEG dataset
@@ -385,14 +407,14 @@ class ExperimentMixin:
                         wl = yaml.safe_load(f).get("wavelength_nm", 1550)
 
                 bg = None
-                if subtract_bg:
-                    bgp = Path(bg_dir) / fpath.name      # same filename in refs dir
-                    if bgp.exists():
-                        bg = proc.load_hologram(bgp)
+                if subtract_bg and ref_index:
+                    nearest = min(ref_index, key=lambda w: abs(w - float(wl)))
+                    if abs(nearest - float(wl)) <= 2.0:      # within 2 nm
+                        bg = proc.load_hologram(ref_index[nearest])
                     else:
                         cb({"type": "log",
-                            "text": f"  (no reference for {fpath.name} — skipping bg)",
-                            "level": "DEBUG"})
+                            "text": f"  (nearest reference {nearest} nm too far "
+                                    f"from {wl} nm — skipping bg)", "level": "DEBUG"})
 
                 results = proc.process_single_hologram(
                     hologram, wavelength_nm=wl,
