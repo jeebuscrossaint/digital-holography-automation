@@ -16,8 +16,9 @@ def _caleb_funcs():
     lib = os.path.join(os.path.dirname(__file__), "lib")
     if os.path.isdir(lib) and lib not in sys.path:
         sys.path.insert(0, lib)
-    from calebsUsefulFunctions import filterForQuadrant, filterDCComponents
-    return filterForQuadrant, filterDCComponents
+    from calebsUsefulFunctions import (filterForQuadrant, filterDCComponents,
+                                        getBlurredCentroid, getMaxIndex)
+    return filterForQuadrant, filterDCComponents, getBlurredCentroid, getMaxIndex
 
 
 def _center_crop_square(image):
@@ -30,16 +31,6 @@ def _center_crop_square(image):
     y0 = (h - s) // 2
     x0 = (w - s) // 2
     return img[y0:y0 + s, x0:x0 + s]
-
-
-def _dc_power(power, dc_diameter):
-    """Sum of power in a small disk at the FFT center (the DC / beam term)."""
-    h, w = power.shape
-    cy, cx = h // 2, w // 2
-    yy, xx = np.ogrid[:h, :w]
-    radius = max(dc_diameter, 2) // 2
-    dc_mask = (xx - cx) ** 2 + (yy - cy) ** 2 <= radius ** 2
-    return float(np.sum(power * dc_mask)) + 1e-12
 
 
 def calculate_sideband_energy(image, quadrant=None, line_filter_width=5,
@@ -61,14 +52,18 @@ def calculate_sideband_energy(image, quadrant=None, line_filter_width=5,
     quadrant: None (default) finds the carrier anywhere off-DC, so it works
     regardless of which diagonal the tilt puts it in. Pass 1/2/3/4 to restrict
     to one corner (Caleb's original 2/4 only works for one tilt direction)."""
-    filter_for_quadrant, filter_dc = _caleb_funcs()
+    filter_for_quadrant, filter_dc, blurred_centroid, max_index = _caleb_funcs()
     img = _center_crop_square(np.asarray(image, dtype=float))
     power = np.abs(np.fft.fftshift(np.fft.fft2(img))) ** 2
 
     side = filter_for_quadrant(power, quadrant) if quadrant else power.copy()
     side = filter_dc(side, line_filter_width, dc_diameter)  # kill DC cross+disk
 
-    py, px = np.unravel_index(int(np.argmax(side)), side.shape)
+    # Locate the carrier the verified way (Caleb's tutorial): disk-blur, then
+    # take the max of the blurred spectrum. A raw argmax on the un-blurred power
+    # can latch onto a single noise / hot-pixel spike instead of the carrier.
+    _, conv, _ = blurred_centroid(side, 2 * window + 1)
+    py, px = max_index(conv)
     y0, y1 = max(0, py - window), min(side.shape[0], py + window + 1)
     x0, x1 = max(0, px - window), min(side.shape[1], px + window + 1)
     peak_mean = float(side[y0:y1, x0:x1].mean())

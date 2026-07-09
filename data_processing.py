@@ -39,6 +39,7 @@ from calebsUsefulFunctions import (
     combinedOutput, normalizeIntensity, overlap2FieldsV2,
     decompAndRecomp, findBestOffset,
     generateMask, makeButterworth, getMaxIndex,
+    getBlurredCentroid, rollMatrix,
 )
 
 
@@ -126,8 +127,11 @@ class HolographyDataProcessor:
         return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx), Sd
 
     def _center_on_beam(self, ES, size):
-        """Crop a size×size window centered on the field's intensity centroid."""
-        cy, cx = ndimage.center_of_mass(np.abs(ES) ** 2)
+        """Crop a size×size window centered on the beam. Uses Caleb's verified
+        getBlurredCentroid (disk-blur then sub-pixel center_of_mass) instead of a
+        raw intensity center_of_mass — the blur is robust to a fragmented /
+        multi-lobe output (a raw centroid lands in the dark gap between lobes)."""
+        _, _, (cy, cx) = getBlurredCentroid(np.abs(ES), size)
         cy, cx = int(round(cy)), int(round(cx))
         N = ES.shape[0]
         y0 = min(max(cy - size // 2, 0), N - size)
@@ -228,6 +232,23 @@ class HolographyDataProcessor:
                                     decomp=dec, recovered_full=ES_full,
                                     recovered_centered=base, selection=sel,
                                     centroid=centroid, modes=modes)
+
+        # Verified x/y position refinement (Caleb's findBestOffset): roll the
+        # winning field to best-fit the mode basis. This is the field-position
+        # optimization the paper does — previously findBestOffset was imported
+        # but never called, so off-centre fields were left uncorrected.
+        b_modes, b_nm = best['modes'], best['nm']
+        xo, yo = findBestOffset(best['field'], b_modes[:b_nm],
+                                -6, 6, -6, 6, 1)
+        if xo or yo:
+            fld_ro = normalizeIntensity(rollMatrix(best['field'], xo, yo))
+            dec_ro = modeDecomp(fld_ro, b_modes, b_nm)
+            rec_ro = combinedOutput(b_modes[:b_nm], dec_ro)
+            fid_ro = abs(overlap2FieldsV2(fld_ro, rec_ro)) ** 2
+            if fid_ro > best['fidelity']:
+                best.update(fidelity=fid_ro, field=fld_ro, decomp=dec_ro,
+                            recomp=normalizeIntensity(rec_ro),
+                            offset=(int(xo), int(yo)))
 
         self._opt_modes = best['modes']
         decomp = best['decomp']
