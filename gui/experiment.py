@@ -285,6 +285,8 @@ class ExperimentMixin:
 
     # ── Processing ────────────────────────────────────────────────────────────
     def _run_processing(self, cb):
+        import re
+        import numpy as np
         import yaml
 
         cb({"type": "log",  "text": "Starting data processing…", "level": "INFO"})
@@ -317,6 +319,51 @@ class ExperimentMixin:
             cb({"type": "log",
                 "text": f"Background subtraction ON (refs: {bg_dir}, modifier {bg_mod})",
                 "level": "INFO"})
+
+        # Auto-select reconstruction method by leg count. A MULTI-LEG dataset
+        # (the fiber switch was used) unlocks the paper's cross-port multiport
+        # method; a single leg can only use single-frame. We run multiport when
+        # >=2 legs are present and keep, PER FRAME, whichever of {multiport,
+        # single-frame} scores higher — so it can never do worse than
+        # single-frame, and auto-upgrades once multiport is tuned on a real
+        # good-optics leg×wavelength sweep. (On the data available today
+        # multiport underperforms and this falls back to single-frame.)
+        def _leg_wl(name):
+            lm = re.search(r"leg(\d+)", name)
+            wm = re.search(r"wavelength(\d+)", name)
+            return (int(lm.group(1)) if lm else None,
+                    int(wm.group(1)) if wm else None)
+
+        legs_present = sorted({_leg_wl(f.name)[0] for f in files} - {None})
+        wls_present  = sorted({_leg_wl(f.name)[1] for f in files} - {None})
+        mp_frames = {}
+        if len(legs_present) >= 2:
+            cb({"type": "log",
+                "text": f"Multi-leg dataset ({len(legs_present)} legs) — running "
+                        f"multiport reconstruction (paper cross-port method)…",
+                "level": "INFO"})
+            try:
+                from multiport_reconstruction import MultiPortReconstructor
+                mp = MultiPortReconstructor(
+                    proc.data_dir, legs_present, wls_present,
+                    filename_fmt="leg{leg:02d}-wavelength{wl:04d}.npy",
+                    crop_size=200, nfft=64, mode_size=180,
+                    core_radius=12e-6, NA=0.11, n_eff=1.453,   # 7-core → 8 modes
+                    diameter_range=(40, 90), pol_half=None,     # single-pol rig
+                    ref_wavelength=wls_present[0])
+                mp_out = mp.reconstruct_all()
+                mp_frames = mp_out.get("frames", {})
+                cb({"type": "log",
+                    "text": f"Multiport mean fidelity "
+                            f"{float(np.mean(mp_out['fidelity'])):.3f} — keeping the "
+                            f"better of multiport/single-frame per frame",
+                    "level": "INFO"})
+            except Exception as e:
+                import traceback
+                cb({"type": "log",
+                    "text": f"Multiport unavailable ({e}) — single-frame only",
+                    "level": "WARN"})
+                cb({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
 
         summary_rows = []
         for i, fpath in enumerate(files):
@@ -351,16 +398,31 @@ class ExperimentMixin:
                     hologram, wavelength_nm=wl,
                     show_plots=False, save_plots=True,
                     plot_prefix=fpath.stem, background=bg, bg_modifier=bg_mod)
-                powers_str = " ".join(
-                    f"{p*100:.1f}%" for p in results["mode_powers"][:5])
+
+                fid = float(results["fidelity"])
+                powers = [float(p) for p in results["mode_powers"]]
+                engine = "single-frame"
+                # Keep multiport's result for this (leg, λ) only if it wins.
+                fr = mp_frames.get(_leg_wl(fpath.name))
+                if fr is not None and float(fr["fidelity"]) > fid:
+                    dp = np.abs(fr["decomp"]) ** 2
+                    ssum = float(dp.sum())
+                    powers = [float(x) for x in (dp / ssum if ssum > 0 else dp)]
+                    cb({"type": "log",
+                        "text": f"  ↑ multiport {float(fr['fidelity']):.4f} beats "
+                                f"single-frame {fid:.4f}", "level": "OK"})
+                    fid = float(fr["fidelity"])
+                    engine = "multiport"
+
+                powers_str = " ".join(f"{p*100:.1f}%" for p in powers[:5])
                 cb({"type": "log",
-                    "text": f"  ✓ Fidelity: {results['fidelity']:.4f}  [{powers_str}]",
+                    "text": f"  ✓ Fidelity: {fid:.4f} ({engine})  [{powers_str}]",
                     "level": "OK"})
                 summary_rows.append({
                     "filename": fpath.name,
                     "wavelength_nm": int(wl),
-                    "fidelity": float(results["fidelity"]),
-                    "mode_powers": [float(p) for p in results["mode_powers"]],
+                    "fidelity": fid,
+                    "mode_powers": powers,
                 })
             except Exception as e:
                 import traceback

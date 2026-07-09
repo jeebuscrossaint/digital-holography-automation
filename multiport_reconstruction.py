@@ -115,7 +115,14 @@ class MultiPortReconstructor:
 
     # ── data ─────────────────────────────────────────────────────────────────
     def _load(self, leg, wl):
-        return np.load(self.data_dir / self.fmt.format(leg=leg, wl=wl))
+        a = np.load(self.data_dir / self.fmt.format(leg=leg, wl=wl)).astype(float)
+        # Zero-pad so a crop×crop window fits around ANY beam position. The
+        # Bobcat frame (256×320) is small and the beam often sits low/off-centre,
+        # which otherwise makes cropArray() return a truncated (non-square)
+        # window and crashes the DC filter. Padding is identical for every frame,
+        # so all beam-centre / carrier coordinates stay mutually consistent.
+        pad = self.crop // 2
+        return np.pad(a, pad, mode="constant")
 
     def _zero_image_half(self, a):
         if self.pol_half == "right":
@@ -161,10 +168,18 @@ class MultiPortReconstructor:
             bf = makeButterworth(self.crop, pk[1], pk[0])
             cents[i] = scipy.ndimage.center_of_mass(fc * bf)
         idx = np.arange(len(self.wavelengths))
-        mx, cx = np.polyfit(idx, cents[:, 0], 1)
-        my, cy = np.polyfit(idx, cents[:, 1], 1)
-        self._xC = idx * mx + cx
-        self._yC = idx * my + cy
+        if len(self.wavelengths) >= 2:
+            # Carrier drifts linearly with wavelength (fringe spacing changes);
+            # a line fit across wavelengths beats each frame's noisy centroid.
+            mx, cx = np.polyfit(idx, cents[:, 0], 1)
+            my, cy = np.polyfit(idx, cents[:, 1], 1)
+            self._xC = idx * mx + cx
+            self._yC = idx * my + cy
+        else:
+            # Single wavelength: nothing to fit — use the (cross-port-averaged)
+            # centroid directly. np.polyfit(deg=1) needs >=2 points and errors.
+            self._xC = cents[:, 0].copy()
+            self._yC = cents[:, 1].copy()
         return self._xC, self._yC
 
     # ── step 3: sub-pixel field extraction for one frame ────────────────────────
