@@ -1,0 +1,72 @@
+data:
+  filename_format: leg{leg:02d}-wavelength{wavelength:04d}.npy
+  output_dir: ./6port/
+  save_metadata: true
+experiment:
+  fringe_detection:
+    check_method: sideband
+    enabled: false
+    max_attempts: 60
+    min_visibility: 200
+  legs: 1
+  polarization:
+    angle_range:
+    - 0
+    - 160
+    angle_step: 10
+    auto_adjust: true
+    search_method: grid
+  validation:
+    max_saturated_fraction: 0.001
+    saturation_level: 65535
+  wait_times:
+    after_leg_switch: 1.0
+    after_polarization_adjust: 0.3
+    after_wavelength_change: 0.5
+  wavelengths:
+    start: 1525
+    step: 1
+    stop: 1530
+hardware:
+  camera:
+    calibration_file: ./hardware/calibration/XC-(10-06-2021)-500us_14931.xca
+    exposure_time: 1000
+    interface: GigE Vision (Ethernet-to-USB adapter)
+    model: Bobcat 320 GigE
+    url: cam://0?fg=XFrameGrabberNative
+  fiber_switch:
+    baudrate: 9600
+    module: 1
+    port: auto
+  laser:
+    gpib_address: GPIB0::24::INSTR
+    power_unit: UW
+    power_uw: 500
+  polarization_motors:
+    initial_angles:
+    - 0
+    - 0
+    - 0
+    max_travel: 160
+    serial_number: 38394984
+logging:
+  level: INFO
+  log_file: ./experiment_log.txt
+  save_log_file: true
+processing:
+  background_dir: ./holography_data/references
+  background_modifier: 0.8
+  core_radius: 1.7e-05
+  crop_size: 200
+  effective_index: 1.453
+  image_size:
+  - 320
+  - 256
+  num_modes: 18
+  numerical_aperture: 0.11
+  phase_factor_range:
+  - -2
+  - 2
+  pixel_size: 7.0e-05
+  quadratic_phase_correction: true
+  subtract_background: true
