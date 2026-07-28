@@ -7,12 +7,11 @@ Used to determine if interference fringes are visible in camera images
 import os
 import sys
 import numpy as np
-import matplotlib.pyplot as plt
 
 
-def _caleb_funcs():
-    """Lazily import Caleb's FFT helpers from lib/ so the optimizer's notion
-    of 'good fringes' matches the reconstruction pipeline exactly."""
+def _fft_helpers():
+    """Lazily import the FFT helpers from lib/ so the optimizer's notion of
+    'good fringes' matches the reconstruction pipeline exactly."""
     lib = os.path.join(os.path.dirname(__file__), "lib")
     if os.path.isdir(lib) and lib not in sys.path:
         sys.path.insert(0, lib)
@@ -22,9 +21,9 @@ def _caleb_funcs():
 
 
 def _center_crop_square(image):
-    """Center-crop to a square. Caleb's filterDCComponents assumes a square
-    frame (it indexes both axes with shape[0] and builds a square DC mask),
-    but the Bobcat 320 is 320x256 — so crop before using his helpers."""
+    """Center-crop to a square. filterDCComponents assumes a square frame (it
+    indexes both axes with shape[0] and builds a square DC mask), but the
+    Bobcat 320 is 320x256 — so crop before using the lib/ helpers."""
     img = np.asarray(image)
     h, w = img.shape[:2]
     s = min(h, w)
@@ -44,24 +43,23 @@ def calculate_sideband_energy(image, quadrant=None, line_filter_width=5,
     carrier's average power divided by the average background power elsewhere.
 
     This is an SNR-like ratio: empirically ~600–13000 for clear fringes vs
-    ~40 for noise (a >100x separation), and scale-invariant. Normalizing by
-    the BACKGROUND rather than by DC is what gives the separation — the bright
-    beam envelope dominates DC and otherwise swamps the carrier (that made
-    even gorgeous fringes read ~0.004 and never clear the threshold).
+    ~40 for noise (a >100x separation), and scale-invariant. Normalize by the
+    BACKGROUND, not by DC — the bright beam envelope dominates DC and swamps
+    the carrier, which drives even excellent fringes to ~0.004.
 
     quadrant: None (default) finds the carrier anywhere off-DC, so it works
     regardless of which diagonal the tilt puts it in. Pass 1/2/3/4 to restrict
-    to one corner (Caleb's original 2/4 only works for one tilt direction)."""
-    filter_for_quadrant, filter_dc, blurred_centroid, max_index = _caleb_funcs()
+    to one corner (only valid for a known, fixed tilt direction)."""
+    filter_for_quadrant, filter_dc, blurred_centroid, max_index = _fft_helpers()
     img = _center_crop_square(np.asarray(image, dtype=float))
     power = np.abs(np.fft.fftshift(np.fft.fft2(img))) ** 2
 
     side = filter_for_quadrant(power, quadrant) if quadrant else power.copy()
     side = filter_dc(side, line_filter_width, dc_diameter)  # kill DC cross+disk
 
-    # Locate the carrier the verified way (Caleb's tutorial): disk-blur, then
-    # take the max of the blurred spectrum. A raw argmax on the un-blurred power
-    # can latch onto a single noise / hot-pixel spike instead of the carrier.
+    # Disk-blur, then take the max of the blurred spectrum. A raw argmax on the
+    # un-blurred power can latch onto a single noise / hot-pixel spike instead
+    # of the carrier.
     _, conv, _ = blurred_centroid(side, 2 * window + 1)
     py, px = max_index(conv)
     y0, y1 = max(0, py - window), min(side.shape[0], py + window + 1)
@@ -281,10 +279,8 @@ def optimize_polarization_for_fringes(camera, pol_motors, max_attempts=60,
     """Maximize fringe visibility by coordinate-ascent over the paddle angles.
 
     For each paddle in turn, scan its full travel, move it to the best angle,
-    then move to the next paddle (holding the others) — then a finer pass.
-    This uses ALL THREE paddles and spends the frame budget across them,
-    fixing the old bug where itertools.product truncation meant paddle 1
-    never moved off 0.
+    then move to the next paddle (holding the others) — then a finer pass. All
+    three paddles are used, and the frame budget is spent across them.
 
     Args:
         camera, pol_motors: hardware handles
@@ -341,10 +337,9 @@ def optimize_polarization_for_fringes(camera, pol_motors, max_attempts=60,
 
     # Coordinate ascent: ONE coarse full-travel sweep per paddle to find the
     # basin, then LOCAL +/- refinement passes with a shrinking step until the
-    # angles stop moving (converged) or the frame budget runs out. The old code
-    # did two blind full-travel sweeps with no convergence check, so a paddle
-    # could get parked at the 0/160 boundary. Now a paddle only ends at a
-    # boundary if the metric genuinely peaks there.
+    # angles stop moving (converged) or the frame budget runs out. The
+    # convergence check is what keeps a paddle off the 0/160 boundary — it
+    # should only end there if the metric genuinely peaks there.
     step = float(angle_step)
     coarse = True
     while not stop and attempts < max_attempts and step >= 1.0:

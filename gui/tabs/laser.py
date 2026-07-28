@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
-from ..style import MUTED
 
 
 class LaserTabMixin:

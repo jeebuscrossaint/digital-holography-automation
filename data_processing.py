@@ -1,45 +1,37 @@
 # -*- coding: utf-8 -*-
-"""
-Automated Data Processing Pipeline for Digital Holography
-Processes hologram images to extract mode decomposition
+"""Single-frame hologram reconstruction — the engine, not a CLI.
 
-Workflow:
-1. Load hologram images
-2. Compute FFT
-3. Find twin image centroids
-4. Extract and interpolate twin images
-5. Apply phase corrections
-6. Mode decomposition with LP modes
-7. Save results and generate plots
+Recovers the complex field from one off-axis hologram and decomposes it onto
+the LP-mode basis, following Dobias et al., Opt. Express 34(9) 17217 (2026),
+Sec. 2:
 
-Author: Amarnath & GitHub Copilot
-Date: March 2026
+    FFT the intensity -> isolate the off-axis sideband -> demodulate to
+    baseband -> Butterworth low-pass -> inverse FFT -> optimize (field
+    position, mode-field diameter, quadratic phase) -> LP decomposition
+    -> fidelity eta = |<E_rec, E_S>|^2  (Eq. 5)
+
+This sees one frame at a time, which is what limits it: the carrier centroid
+has to be estimated from that frame alone. ``multiport_reconstruction`` does
+better by averaging the carrier across ports, and ``pipeline`` picks between
+them. To process a folder, use ``process.py``.
 """
 
 import sys
-import os
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
 from pathlib import Path
 from scipy import ndimage, signal
-from datetime import datetime
 
-from pathlib import Path as _Path
-_ROOT = _Path(__file__).parent
+_ROOT = Path(__file__).parent
 _lib = str(_ROOT / 'lib')
 if _lib not in sys.path:
     sys.path.insert(0, _lib)
 
-from MMF import MMF
-from calebsUsefulFunctions import (
-    fft, ifft, pltAbs, pltAngle, pltBoth, pltLogAbs,
-    generateModes, findCentroid, cropArray, filterDCComponents,
-    generatePhaseMask, applyQuadraticPhase, modeDecomp,
-    combinedOutput, normalizeIntensity, overlap2FieldsV2,
-    decompAndRecomp, findBestOffset,
-    generateMask, makeButterworth, getMaxIndex,
-    getBlurredCentroid, rollMatrix,
+from calebsUsefulFunctions import (  # noqa: E402
+    pltBoth, generateModes, filterDCComponents, generatePhaseMask, modeDecomp,
+    combinedOutput, normalizeIntensity, overlap2FieldsV2, findBestOffset,
+    generateMask, makeButterworth, getMaxIndex, getBlurredCentroid, rollMatrix,
 )
 
 
@@ -61,22 +53,27 @@ class HolographyDataProcessor:
 
         # --- reconstruction settings (Dobias et al., Opt. Express 2026) ---
         # float() guards YAML reading e-notation as a string.
-        # crop_size = the window (px) kept around the beam. This is the "zoom":
-        # too small and you crop the mode's outer structure off and cap fidelity
-        # (Caleb: "your image is still very zoomed in ... cropping something
-        # twice"). 200 px captures the full field on a 256-px frame and lifts
-        # fidelity ~92% -> ~96%. Clamped to the frame size at process time.
+        # crop_size = the window (px) kept around the beam. Too small and the
+        # mode's outer structure is cropped off, which caps fidelity; 200 px
+        # captures the full field on a 256-px frame. Clamped to the frame size
+        # at process time.
         self._grid        = int(self.proc_config.get('crop_size', 200))
         self._core_radius = float(self.proc_config.get('core_radius', 1.7e-5))
         self._NA          = float(self.proc_config.get('numerical_aperture', 0.11))
         self._n_eff       = float(self.proc_config.get('effective_index', 1.453))
+        # Cap on basis size. The basis should match the mode count the lantern
+        # physically supports (core_radius/NA set that) — a larger basis just
+        # overfits noise and inflates fidelity. See CLAUDE.md.
         self._num_modes   = int(self.proc_config.get('num_modes', 18))
         # Parameters optimized per-hologram to maximize fidelity (the paper
         # optimizes field position, mode-field diameter, and quadratic phase):
         self._lp_cuts = [22, 30, 40]                              # Butterworth cutoff (px)
-        # FOV scan widened to match the bigger window so the mode can fill it.
+        # FOV scan; sets the mode-field diameter on the grid (pixel size = fov/grid).
         self._fovs    = [round(v, 9) for v in np.arange(20e-6, 130e-6, 10e-6)]
-        self._phases  = np.arange(-3.0, 3.01, 0.5)               # quadratic-phase factor k
+        # Quadratic-phase factor k (defocus). Scanned over the configured range.
+        lo, hi = self.proc_config.get('phase_factor_range', [-3.0, 3.0])
+        step = float(self.proc_config.get('phase_factor_step', 0.5)) or 0.5
+        self._phases = np.arange(float(lo), float(hi) + step / 2, step)
         self._mode_cache = {}
         self._opt_modes = None
         # self.modes generated lazily per-FOV during optimization (_modes_at).
@@ -96,15 +93,14 @@ class HolographyDataProcessor:
         raw intensity, locate the twin sideband sub-pixel, demodulate it to DC,
         Butterworth low-pass to isolate it, IFFT to the complex field. Returns
         (ES, centroid, selection).
-        NOTE: FFT the intensity directly — do NOT sqrt it (that was an old bug).
 
-        Carrier location uses Caleb's VERIFIED recipe (the same one
-        multiport_reconstruction.fit_carrier_centroids uses per frame):
-        filterDCComponents (zeros the on-axis DC *cross* AND a center disk) ->
-        disk-blur -> makeButterworth-weighted sub-pixel center_of_mass. The old
-        code took a raw argmax just outside an 18-px disk; on low-contrast frames
-        the residual DC skirt outshone the true sideband, so it locked onto DC and
-        demodulated around it -> ~1% fidelity garbage (e.g. 1525 nm, 1550 nm)."""
+        FFT the intensity directly — do NOT sqrt it.
+
+        The carrier must be found by zeroing the DC cross and centre disk, then
+        disk-blurring, then taking a Butterworth-weighted sub-pixel centroid.
+        A raw argmax outside a small disk is not good enough: on a low-contrast
+        frame the residual DC skirt outshines the true sideband, so it locks
+        onto DC and demodulates around it, producing ~1% fidelity."""
         H = hologram.astype(float)
         N = H.shape[0]
         F = np.fft.fftshift(np.fft.fft2(H))
@@ -127,10 +123,10 @@ class HolographyDataProcessor:
         return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx), Sd
 
     def _center_on_beam(self, ES, size):
-        """Crop a size×size window centered on the beam. Uses Caleb's verified
-        getBlurredCentroid (disk-blur then sub-pixel center_of_mass) instead of a
-        raw intensity center_of_mass — the blur is robust to a fragmented /
-        multi-lobe output (a raw centroid lands in the dark gap between lobes)."""
+        """Crop a size×size window centered on the beam, via getBlurredCentroid
+        (disk-blur then sub-pixel center_of_mass). The blur matters: a lantern
+        output is often fragmented into lobes, and a raw intensity centroid
+        lands in the dark gap between them."""
         _, _, (cy, cx) = getBlurredCentroid(np.abs(ES), size)
         cy, cx = int(round(cy)), int(round(cx))
         N = ES.shape[0]
@@ -164,10 +160,9 @@ class HolographyDataProcessor:
             plot_prefix: Prefix for saved plot filenames
             background: optional reference/background frame (same shape) to
                 subtract before reconstruction — removes the low-frequency
-                beam envelope/oscillations (Caleb's tip). Capture it as the
-                reference beam alone, ideally one per wavelength.
-            bg_modifier: scale on the background subtraction (Caleb: "hopefully
-                it's 1").
+                beam envelope/oscillations. Capture it as the reference beam
+                alone, ideally one per wavelength.
+            bg_modifier: scale on the background subtraction (nominally 1).
 
         Returns:
             Dictionary with processing results
@@ -186,7 +181,7 @@ class HolographyDataProcessor:
             else:
                 print(f"  [bg] skipped — background shape {bg.shape} != frame {hologram.shape}")
 
-        # Center-crop to a square — Caleb's FFT helpers (filterDCComponents,
+        # Center-crop to a square — the FFT helpers (filterDCComponents,
         # findCentroid, generateMask) assume a square frame, but the Bobcat
         # 320 is 320x256. Without this the DC mask can't broadcast.
         h, w = hologram.shape[:2]
@@ -233,10 +228,8 @@ class HolographyDataProcessor:
                                     recovered_centered=base, selection=sel,
                                     centroid=centroid, modes=modes)
 
-        # Verified x/y position refinement (Caleb's findBestOffset): roll the
-        # winning field to best-fit the mode basis. This is the field-position
-        # optimization the paper does — previously findBestOffset was imported
-        # but never called, so off-centre fields were left uncorrected.
+        # Field-position refinement (paper Sec. 2): roll the winning field to
+        # best-fit the mode basis.
         b_modes, b_nm = best['modes'], best['nm']
         xo, yo = findBestOffset(best['field'], b_modes[:b_nm],
                                 -6, 6, -6, 6, 1)
@@ -289,13 +282,13 @@ class HolographyDataProcessor:
             save: Save plots to file
             prefix: Filename prefix for saved plots
         """
-        # The reconstruction breakdown Caleb asked for, in one image (2x4):
+        # The full reconstruction breakdown in one image (2x4):
         #   1 original   2 FFT+carrier   3 FFT selection   4 recovered field
         #   5 recovered + corrections (phase + bg)   6 recomposition + fidelity
         #   7 LP01 reference   8 mode-power distribution
         modes = self._opt_modes if self._opt_modes is not None else []
         recov = results.get('recovered_centered', results['recovered_field_corrected'])
-        fig = plt.figure(figsize=(16, 8))
+        plt.figure(figsize=(16, 8))
 
         ax = plt.subplot(2, 4, 1)
         ax.imshow(hologram, cmap='gray'); ax.set_title('1. Original hologram')
@@ -349,137 +342,8 @@ class HolographyDataProcessor:
         else:
             plt.close()
     
-    def process_dataset(self, show_plots=False, save_plots=True):
-        """Process all holograms in dataset
-        
-        Args:
-            show_plots: Display plots interactively
-            save_plots: Save plots to files
-        """
-        # Find all .npy files in data directory
-        hologram_files = sorted(self.data_dir.glob('leg*.npy'))
-        
-        if len(hologram_files) == 0:
-            print(f"No hologram files found in {self.data_dir}")
-            return
-        
-        print("=" * 60)
-        print(f"PROCESSING {len(hologram_files)} HOLOGRAMS")
-        print("=" * 60 + "\n")
-        
-        all_results = []
-        
-        for i, filepath in enumerate(hologram_files):
-            print(f"\n[{i+1}/{len(hologram_files)}] Processing: {filepath.name}")
-            
-            # Load metadata if available
-            metadata_file = filepath.with_suffix('.yaml')
-            wavelength_nm = 1550  # default
-            
-            if metadata_file.exists():
-                with open(metadata_file, 'r') as f:
-                    metadata = yaml.safe_load(f)
-                    wavelength_nm = metadata.get('wavelength_nm', 1550)
-            
-            # Load hologram
-            hologram = self.load_hologram(filepath)
-            
-            # Process
-            try:
-                results = self.process_single_hologram(
-                    hologram,
-                    wavelength_nm=wavelength_nm,
-                    show_plots=show_plots,
-                    save_plots=save_plots,
-                    plot_prefix=filepath.stem
-                )
-                
-                results['filename'] = filepath.name
-                results['filepath'] = str(filepath)
-                
-                # Save results
-                results_file = self.results_dir / f'{filepath.stem}_results.npz'
-                np.savez(results_file,
-                        mode_decomposition=results['mode_decomposition'],
-                        mode_powers=results['mode_powers'],
-                        fidelity=results['fidelity'],
-                        recovered_field=results['recovered_field_corrected'])
-                
-                all_results.append(results)
-                
-                print(f"  [ok] Completed")
-                
-            except Exception as e:
-                print(f"  [error] processing {filepath.name}: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # Save summary
-        print("\n" + "=" * 60)
-        print("PROCESSING COMPLETE")
-        print("=" * 60)
-        
-        summary = {
-            'processing_date': datetime.now().isoformat(),
-            'total_processed': len(all_results),
-            'results': []
-        }
-        
-        for res in all_results:
-            summary['results'].append({
-                'filename': res['filename'],
-                'fidelity': float(res['fidelity']),
-                'mode_powers': res['mode_powers'].tolist()
-            })
-        
-        summary_file = self.results_dir / 'processing_summary.yaml'
-        with open(summary_file, 'w') as f:
-            yaml.dump(summary, f)
-        
-        print(f"\nSummary saved: {summary_file}")
-        print(f"Results directory: {self.results_dir}")
-        
-        return all_results
-
-
-def main():
-    """Main entry point"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(
-        description='Automated Data Processing for Digital Holography'
-    )
-    parser.add_argument(
-        '--config',
-        default='experiment_config.yaml',
-        help='Path to configuration file'
-    )
-    parser.add_argument(
-        '--show-plots',
-        action='store_true',
-        help='Display plots interactively'
-    )
-    parser.add_argument(
-        '--no-save-plots',
-        action='store_true',
-        help='Do not save plots to files'
-    )
-    
-    args = parser.parse_args()
-    
-    print("\n" + "=" * 60)
-    print("DIGITAL HOLOGRAPHY DATA PROCESSOR")
-    print("Photonic Lantern Mode Decomposition")
-    print("=" * 60 + "\n")
-    
-    processor = HolographyDataProcessor(config_file=args.config)
-    processor.process_dataset(
-        show_plots=args.show_plots,
-        save_plots=not args.no_save_plots
-    )
-    
-    print("\n[done] Processing finished.\n")
-
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(
+        "data_processing is the single-frame reconstruction engine, not a CLI.\n"
+        "To process a folder of holograms:  python process.py <folder>")

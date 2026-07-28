@@ -5,7 +5,6 @@ and the camera preview. The preview *loop* and frame rendering live in
 
 import threading
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QRadioButton, QVBoxLayout, QWidget,

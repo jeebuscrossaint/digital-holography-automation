@@ -198,13 +198,18 @@ class PolarizationTabMixin:
         try:
             from fringe_detection import optimize_polarization_for_fringes
             fd = self.config.get("experiment", {}).get("fringe_detection", {})
+            pol = self.config.get("experiment", {}).get("polarization", {})
+            motors_cfg = self.config.get("hardware", {}).get(
+                "polarization_motors", {})
             method = method or fd.get("check_method", "variance")
             label = "Balance" if method == "balance" else "Auto-optimize"
             success, metric, angles = optimize_polarization_for_fringes(
                 self.camera, self.motors,
                 max_attempts=int(fd.get("max_attempts", 30)),
                 method=method,
-                threshold=float(fd.get("min_visibility", 0.15)))
+                threshold=float(fd.get("min_visibility", 0.15)),
+                angle_step=float(pol.get("angle_step", 20)),
+                max_travel=float(motors_cfg.get("max_travel", 160)))
             mark = "✓" if success else "⚠"
             msg = (f"{mark} {label}: paddles={[round(a, 1) for a in angles]}, "
                    f"{'weaker-axis ' if method == 'balance' else ''}metric={metric:.3f}"

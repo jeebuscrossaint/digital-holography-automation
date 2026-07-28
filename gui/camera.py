@@ -3,8 +3,8 @@
 and rendering frames onto the Run tab's preview label.
 
 PreviewLabel rescales a *cached* pixmap on resize (a cheap Qt scale), so
-maximizing / dragging the window is smooth — no per-event re-render of the
-source frame (that jank was the tkinter canvas redrawing on every Configure)."""
+maximizing / dragging the window stays smooth — the source frame is not
+re-rendered on every resize event."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap

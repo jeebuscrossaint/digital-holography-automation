@@ -99,8 +99,8 @@ class ConnectionMixin:
             self._emit(f"✓ Camera  Xenics Bobcat 320 GigE  SER:{ser}", "OK")
             no_frames = False
             for line in getattr(self.camera, "init_log", []):
-                # Escalate the self-diagnostics so a dead stream is obvious.
-                # "Connected but no frames" is the trap that cost days.
+                # Escalate the self-diagnostics so a dead stream is obvious —
+                # "connected but no frames" otherwise looks like success.
                 if "NO FRAMES" in line:
                     no_frames = True
                     self._emit(f"  ⚠ {line}", "WARN")

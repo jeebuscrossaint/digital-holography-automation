@@ -5,11 +5,9 @@ marshals worker-thread messages onto the GUI thread, and the background
 hardware poller."""
 
 import html
-import threading
 import time
 from datetime import datetime
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QTabWidget, QTextEdit,
     QVBoxLayout, QWidget,

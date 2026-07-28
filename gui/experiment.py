@@ -34,9 +34,10 @@ def format_capture_name(fmt: str, leg, wl) -> str:
 
 
 def read_paddle_angles(motors):
-    """Actual paddle positions read from the hardware. NOT motors.angles — that's
-    the last *commanded* angle and is stale ([0,0,0]) if the app didn't move the
-    paddles this session, so the saved metadata was wrong."""
+    """Actual paddle positions read from the hardware. Deliberately not
+    motors.angles — that is the last *commanded* angle, which is stale
+    ([0,0,0]) if the app hasn't moved the paddles this session, and it would
+    be recorded into the capture metadata as if it were measured."""
     if motors is None:
         return [0.0, 0.0, 0.0]
     out = []
@@ -129,6 +130,8 @@ class ExperimentMixin:
         wls    = cfg["experiment"]["wavelengths"]
         waits  = cfg["experiment"]["wait_times"]
         fdet   = cfg["experiment"]["fringe_detection"]
+        pol_cfg    = cfg["experiment"].get("polarization", {})
+        motors_cfg = cfg["hardware"].get("polarization_motors", {})
         fmt    = cfg["data"]["filename_format"]
         out    = Path(cfg["data"]["output_dir"])
         out.mkdir(parents=True, exist_ok=True)
@@ -218,7 +221,9 @@ class ExperimentMixin:
                             success, best, _ = optimize_polarization_for_fringes(
                                 self.camera, self.motors,
                                 max_attempts=fdet["max_attempts"],
-                                method=method, threshold=threshold)
+                                method=method, threshold=threshold,
+                                angle_step=float(pol_cfg.get("angle_step", 20)),
+                                max_travel=float(motors_cfg.get("max_travel", 160)))
                             if success:
                                 cb({"type": "log",
                                     "text": f"  ✓ Polarization optimized (metric={best:.3f})",
@@ -286,185 +291,85 @@ class ExperimentMixin:
     # ── Processing ────────────────────────────────────────────────────────────
     def _run_processing(self, cb):
         import re
-        import numpy as np
         import yaml
+
+        import pipeline
 
         cb({"type": "log",  "text": "Starting data processing…", "level": "INFO"})
         cb({"type": "progress", "status": "Loading processor…", "percent": 0})
+
+        def log(text, level="INFO"):
+            cb({"type": "log", "text": text, "level": level})
 
         try:
             from data_processing import HolographyDataProcessor
             proc = HolographyDataProcessor(config_file=CONFIG_FILE)
         except Exception as e:
-            cb({"type": "log", "text": f"Processor init failed: {e}", "level": "ERROR"})
+            log(f"Processor init failed: {e}", "ERROR")
             return
 
         files = sorted(Path(proc.data_dir).glob("leg*.npy"))
         if not files:
-            cb({"type": "log",
-                "text": "No hologram files found — run collection first", "level": "WARN"})
+            log("No hologram files found — run collection first", "WARN")
             return
+        log(f"Found {len(files)} holograms", "INFO")
 
-        cb({"type": "log", "text": f"Found {len(files)} holograms", "level": "INFO"})
+        def leg_wl_of(name):
+            """Leg and wavelength encoded in a capture filename. A fractional
+            wavelength is written 1547p3 (not 1547.3), so the token is digits +
+            optional 'p' + digits — a literal dot would swallow the extension."""
+            lm = re.search(r"leg(\d+)", name)
+            wm = re.search(r"wavelength(\d+(?:p\d+)?)", name)
+            return (int(lm.group(1)) if lm else None,
+                    float(wm.group(1).replace("p", ".")) if wm else None)
 
-        # Background subtraction (Caleb's tip): if enabled and a reference
-        # library exists, subtract the per-wavelength reference frame before
-        # reconstruction. Worth ~+0.4 pts fidelity. Off by default.
+        records = []
+        for f in files:
+            leg, wl = leg_wl_of(f.name)
+            meta = f.with_suffix(".yaml")
+            if meta.exists():
+                try:
+                    wl = yaml.safe_load(meta.read_text()).get("wavelength_nm", wl)
+                except Exception:
+                    pass
+            records.append({"path": f, "label": f.stem, "leg": leg,
+                            "wl": float(wl if wl is not None else 1550)})
+
+        # Reference library, indexed by wavelength so a fine (e.g. 0.1 nm)
+        # library can serve a sweep at any step via nearest-λ match.
         pcfg = self.config.get("processing", {})
         bg_dir = pcfg.get("background_dir")
-        bg_mod = float(pcfg.get("background_modifier", 0.8))
-        subtract_bg = (bool(pcfg.get("subtract_background", False))
-                       and bg_dir and Path(bg_dir).exists())
-        # Index the reference library by wavelength so a fine (e.g. 0.1 nm)
-        # library can be reused for a data sweep at ANY step — we pick the
-        # nearest-wavelength reference instead of requiring an exact filename
-        # match. References are leg-independent (reference beam doesn't pass
-        # through the lantern), so we key on wavelength only.
         ref_index = {}
-        if subtract_bg:
-            def _wl_of(name):
-                # filenames encode a fractional λ as 1547p3 (not 1547.3), so the
-                # token is digits + optional 'p' + digits — no literal dot, or the
-                # regex would swallow the '.npy' extension's dot.
-                m = re.search(r"wavelength(\d+(?:p\d+)?)", name)
-                if not m:
-                    return None
-                try:
-                    return float(m.group(1).replace("p", "."))
-                except ValueError:
-                    return None
+        if pcfg.get("subtract_background") and bg_dir and Path(bg_dir).exists():
             for rp in Path(bg_dir).glob("*.npy"):
-                w = _wl_of(rp.name)
+                _, w = leg_wl_of(rp.name)
                 if w is not None:
                     ref_index[w] = rp
-            cb({"type": "log",
-                "text": f"Background subtraction ON — {len(ref_index)} reference "
-                        f"wavelengths in {bg_dir} (modifier {bg_mod}, nearest-λ match)",
-                "level": "INFO"})
+            log(f"Background subtraction ON — {len(ref_index)} reference "
+                f"wavelengths in {bg_dir} "
+                f"(modifier {pcfg.get('background_modifier', 1.0)}, nearest-λ match)",
+                "INFO")
 
-        # Auto-select reconstruction method by leg count. A MULTI-LEG dataset
-        # (the fiber switch was used) unlocks the paper's cross-port multiport
-        # method; a single leg can only use single-frame. We run multiport when
-        # >=2 legs are present and keep, PER FRAME, whichever of {multiport,
-        # single-frame} scores higher — so it can never do worse than
-        # single-frame, and auto-upgrades once multiport is tuned on a real
-        # good-optics leg×wavelength sweep. (On the data available today
-        # multiport underperforms and this falls back to single-frame.)
-        def _leg_wl(name):
-            lm = re.search(r"leg(\d+)", name)
-            wm = re.search(r"wavelength(\d+)", name)
-            return (int(lm.group(1)) if lm else None,
-                    int(wm.group(1)) if wm else None)
+        done = [0]
 
-        legs_present = sorted({_leg_wl(f.name)[0] for f in files} - {None})
-        wls_present  = sorted({_leg_wl(f.name)[1] for f in files} - {None})
-        mp_frames = {}
-        if len(legs_present) >= 2:
-            cb({"type": "log",
-                "text": f"Multi-leg dataset ({len(legs_present)} legs) — running "
-                        f"multiport reconstruction (paper cross-port method)…",
-                "level": "INFO"})
-            try:
-                from multiport_reconstruction import MultiPortReconstructor
-                mp = MultiPortReconstructor(
-                    proc.data_dir, legs_present, wls_present,
-                    filename_fmt="leg{leg:02d}-wavelength{wl:04d}.npy",
-                    crop_size=200, nfft=64, mode_size=180,
-                    core_radius=12e-6, NA=0.11, n_eff=1.453,   # 7-core → 8 modes
-                    diameter_range=(40, 90), pol_half=None,     # single-pol rig
-                    ref_wavelength=wls_present[0])
-                mp_out = mp.reconstruct_all()
-                mp_frames = mp_out.get("frames", {})
-                cb({"type": "log",
-                    "text": f"Multiport mean fidelity "
-                            f"{float(np.mean(mp_out['fidelity'])):.3f} — keeping the "
-                            f"better of multiport/single-frame per frame",
-                    "level": "INFO"})
-            except Exception as e:
-                import traceback
-                cb({"type": "log",
-                    "text": f"Multiport unavailable ({e}) — single-frame only",
-                    "level": "WARN"})
-                cb({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
+        def progress_log(text, level="INFO"):
+            log(text, level)
+            if text.startswith("["):        # one per frame
+                done[0] += 1
+                cb({"type": "progress",
+                    "percent": done[0] / len(records) * 100,
+                    "status": f"Processing {done[0]}/{len(records)}",
+                    "acq": done[0], "total_acq": len(records)})
 
-        summary_rows = []
-        for i, fpath in enumerate(files):
-            if self.stop_event.is_set():
-                break
+        rows = pipeline.process_records(
+            proc, records, config=self.config, log=progress_log,
+            ref_index=ref_index, save=True, show=False,
+            should_stop=self.stop_event.is_set)
 
-            cb({"type": "progress",
-                "percent": i / len(files) * 100,
-                "status":  f"Processing {fpath.name} ({i+1}/{len(files)})",
-                "acq": i + 1, "total_acq": len(files)})
-            cb({"type": "log", "text": f"Processing: {fpath.name}", "level": "INFO"})
-
-            try:
-                hologram = proc.load_hologram(fpath)
-                wl = 1550
-                meta_f = fpath.with_suffix(".yaml")
-                if meta_f.exists():
-                    with open(meta_f) as f:
-                        wl = yaml.safe_load(f).get("wavelength_nm", 1550)
-
-                bg = None
-                if subtract_bg and ref_index:
-                    nearest = min(ref_index, key=lambda w: abs(w - float(wl)))
-                    if abs(nearest - float(wl)) <= 2.0:      # within 2 nm
-                        bg = proc.load_hologram(ref_index[nearest])
-                    else:
-                        cb({"type": "log",
-                            "text": f"  (nearest reference {nearest} nm too far "
-                                    f"from {wl} nm — skipping bg)", "level": "DEBUG"})
-
-                results = proc.process_single_hologram(
-                    hologram, wavelength_nm=wl,
-                    show_plots=False, save_plots=True,
-                    plot_prefix=fpath.stem, background=bg, bg_modifier=bg_mod)
-
-                fid = float(results["fidelity"])
-                powers = [float(p) for p in results["mode_powers"]]
-                engine = "single-frame"
-                # Keep multiport's result for this (leg, λ) only if it wins.
-                fr = mp_frames.get(_leg_wl(fpath.name))
-                if fr is not None and float(fr["fidelity"]) > fid:
-                    dp = np.abs(fr["decomp"]) ** 2
-                    ssum = float(dp.sum())
-                    powers = [float(x) for x in (dp / ssum if ssum > 0 else dp)]
-                    cb({"type": "log",
-                        "text": f"  ↑ multiport {float(fr['fidelity']):.4f} beats "
-                                f"single-frame {fid:.4f}", "level": "OK"})
-                    fid = float(fr["fidelity"])
-                    engine = "multiport"
-
-                powers_str = " ".join(f"{p*100:.1f}%" for p in powers[:5])
-                cb({"type": "log",
-                    "text": f"  ✓ Fidelity: {fid:.4f} ({engine})  [{powers_str}]",
-                    "level": "OK"})
-                summary_rows.append({
-                    "filename": fpath.name,
-                    "wavelength_nm": int(wl),
-                    "fidelity": fid,
-                    "mode_powers": powers,
-                })
-            except Exception as e:
-                import traceback
-                cb({"type": "log", "text": f"  ✗ {e}", "level": "ERROR"})
-                cb({"type": "log", "text": traceback.format_exc(), "level": "DEBUG"})
-
-        # Write the summary the Results tab reads (the GUI path never did this
-        # before, so Results was always empty after a run).
-        try:
-            from datetime import datetime as _dt
-            proc.results_dir.mkdir(parents=True, exist_ok=True)
-            with open(proc.results_dir / "processing_summary.yaml", "w") as f:
-                yaml.dump({"processing_date": _dt.now().isoformat(),
-                           "total_processed": len(summary_rows),
-                           "results": summary_rows}, f, sort_keys=False)
-        except Exception as e:
-            cb({"type": "log", "text": f"  (couldn't write results summary: {e})", "level": "DEBUG"})
+        pipeline.write_summary(proc.results_dir, rows, log=log)
 
         cb({"type": "progress", "percent": 100, "status": "Processing complete"})
-        cb({"type": "log", "text": "Data processing complete", "level": "OK"})
+        log("Data processing complete", "OK")
 
     # ── Done handler (GUI thread) ───────────────────────────────────────────────
     def _on_done(self, event: str, success: bool):

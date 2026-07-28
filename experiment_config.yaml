@@ -1,3 +1,7 @@
+# Photonic Lantern Digital Holography — instrument addresses + sweep settings.
+# Every key here is read by the code. If you add one, wire it up or leave it out;
+# a knob that silently does nothing is worse than no knob.
+
 hardware:
   laser:
     gpib_address: GPIB0::24::INSTR
@@ -15,13 +19,10 @@ hardware:
     module: 1
   polarization_motors:
     serial_number: 38394984
-    max_travel: 160
-    initial_angles:
-    - 0
-    - 0
-    - 0
+    max_travel: 160     # paddle range (deg); bounds the auto-optimizer sweep
+
 experiment:
-  legs: 1
+  legs: 1               # a list, a scalar, or {start, stop, step}
   wavelengths:
     start: 1525
     stop: 1530
@@ -32,40 +33,51 @@ experiment:
     after_polarization_adjust: 0.3
   fringe_detection:
     enabled: false
-    min_visibility: 200
-    max_attempts: 60
-    check_method: sideband
+    min_visibility: 200      # threshold on check_method's metric, not a 0-1 fraction
+    max_attempts: 60         # frame budget for the optimizer
+    check_method: sideband   # variance | michelson | fft_peaks | sideband | balance
   validation:
-    saturation_level: 65535
-    max_saturated_fraction: 0.001
+    saturation_level: 65535       # Bobcat 320 is Mono16
+    max_saturated_fraction: 0.001 # above this the frame is flagged invalid
   polarization:
-    auto_adjust: true
-    search_method: grid
-    angle_step: 10
-    angle_range:
-    - 0
-    - 160
+    angle_step: 10       # coarse sweep step (deg); a finer pass follows
+
 data:
   output_dir: ./holography_collection_only/
   filename_format: leg{leg:02d}-wavelength{wavelength:04d}.npy
   save_metadata: true
+
 processing:
-  image_size:
-  - 320
-  - 256
-  crop_size: 200
-  num_modes: 18
-  subtract_background: true
-  background_dir: ./holography_data/references
-  background_modifier: 0.8
+  crop_size: 200        # window (px) kept around the beam; also the recon grid
+
+  # --- single-frame LP basis (data_processing.py) ---
+  # core_radius + numerical_aperture determine how many LP modes the basis has,
+  # and that should match what the lantern physically supports (an N-port
+  # lantern supports ~N modes). These values give 15 modes; the multiport block
+  # below gives 8 for the same lantern. See CLAUDE.md, "Known physics
+  # discrepancy" — resolving it is a call about which lantern is on the bench.
   core_radius: 1.7e-05
   numerical_aperture: 0.11
   effective_index: 1.453
-  pixel_size: 7.0e-05
-  quadratic_phase_correction: true
-  phase_factor_range:
-  - -2
-  - 2
+  num_modes: 18         # cap only; the basis is never larger than what NA allows
+
+  # --- multiport / cross-port LP basis (multiport_reconstruction.py) ---
+  multiport:
+    core_radius: 1.2e-05      # 7-port lantern -> 8 modes
+    numerical_aperture: 0.11
+    effective_index: 1.453
+
+  # Quadratic-phase (defocus) scan, optimized per frame.
+  phase_factor_range: [-3.0, 3.0]
+  phase_factor_step: 0.5
+
+  # Background = the reference beam alone, one frame per wavelength. Matched by
+  # nearest wavelength (within 2 nm). Silently skipped if background_dir is
+  # missing, so check the path if subtraction seems to do nothing.
+  subtract_background: true
+  background_dir: ./holography_data/references
+  background_modifier: 0.8
+
 logging:
   level: INFO
   save_log_file: true

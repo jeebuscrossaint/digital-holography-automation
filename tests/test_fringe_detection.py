@@ -4,7 +4,6 @@ prominence metric the polarization optimizer maximizes. All synthetic, so no
 hardware or captured data is needed and they run in milliseconds."""
 
 import numpy as np
-import pytest
 
 from fringe_detection import (calculate_sideband_energy, check_saturation,
                               calculate_sideband_balance)
