@@ -1,5 +1,23 @@
 # CLAUDE.md
 
+## How to answer in this repo
+
+Amarnath is a physicist, not a software reviewer. He wants the measurement to
+work, not a report about the code.
+
+- **Lead with the answer.** One or two sentences. Detail only if asked.
+- **No status tables, no bullet inventories, no "here's what I found" preambles**
+  unless he asks for a summary.
+- **Don't re-explain what you just did.** He watched it happen.
+- **Don't ask permission for reversible things.** It's a solo repo, everything is
+  in git. Just do it and say what you did in one line. Commit straight to `main`.
+- **Do ask** about bench facts you cannot check: port count of the lantern,
+  fiber spec, whether a dataset is trustworthy. Those are his to answer.
+- Fewer, bigger questions. Not a question per step.
+
+Being right matters more than being thorough-sounding. If something is broken,
+say which line and why, then fix it.
+
 Photonic-lantern digital holography for UCF CREOL (Eikenberry group). The job:
 measure the **wavelength-dependent transfer matrix** of a photonic lantern by
 off-axis digital holography, reproducing
