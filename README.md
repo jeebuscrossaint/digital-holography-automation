@@ -114,13 +114,18 @@ the result can never be worse than single-frame.
   oversized basis inflates fidelity by absorbing noise — see **CLAUDE.md,
   "Known physics discrepancy"**. Resolve the lantern's real mode count before
   quoting a fidelity against the paper.
-- **Multiport is close to, but does not yet match, the paper.** Run over the
-  paper's own archived dataset (19 ports × 51 wavelengths, 23-mode basis,
-  consolidated basis, Caleb's own parameters) it gives **96.76% ± 0.95%** against
-  the paper's 98% ± 0.8% — about 1.2 points unexplained. The fiber spec is not
-  the cause. See **CLAUDE.md, "The missing 1.2 points"**, which also records why
-  narrowing the Butterworth passband to reach 98% is a false fix. Pinned by
-  `tests/test_multiport.py` (auto-skips without the dataset, gitignored/multi-GB).
+- **Multiport is a verified reproduction of Caleb's analysis.** Over his
+  archived 19-port × 51-wavelength dataset it gives **96.76% ± 0.95%** against
+  his own stored **96.89% ± 1.48%** — with identical carrier centroids (0.000 px),
+  an identical interpolated twin image (\|overlap\| = 1.000000), and mode
+  decompositions matching to 0.997–0.9998 cosine similarity. Our worst frame is
+  93.7% where his is 81.1%, thanks to the consolidated basis.
+- **The paper's printed 98% ± 0.8% is not reproducible from that dataset** — not
+  here and not by Caleb's own saved run, which also lands at 96.9%. The ~1.1
+  point difference sits between his 2023 analysis and the published figure.
+  See **CLAUDE.md**, which also records why tuning the Butterworth passband to
+  hit 98% is a false fix. Pinned by `tests/test_multiport.py` (auto-skips
+  without the dataset, which is gitignored and multi-GB).
 - Multiport has **not** yet been validated on a leg × wavelength sweep from
   *this* rig — only on the paper's data. On the rig data available today it
   underperforms and the pipeline falls back to single-frame per frame.

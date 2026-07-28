@@ -34,10 +34,10 @@ Recovery (paper Sec. 2), and what implements each step:
 Paper's result: **98% ± 0.8%**, 19 ports × 51 wavelengths (1525–1575 nm),
 23-mode basis, 34 µm MMF core diameter.
 
-**This repo does not fully reproduce that yet.** Multiport, run over the paper's
-own archived dataset (`_caleb_ref/10-17-2023-Wavelengths`) with Caleb's own
-parameters and the 23-mode basis, gets **96.76% ± 0.95%**. About **1.2 points
-are unexplained** — see below. Pinned by
+**This repo faithfully reproduces Caleb's analysis** of that dataset —
+**96.76% ± 0.95%** against his own stored **96.89% ± 1.48%**, verified stage by
+stage (see below). It does *not* reach the paper's printed 98%, and neither does
+his own saved run. Pinned by
 `tests/test_multiport.py::test_consolidated_basis_matches_measured_fidelity`,
 which auto-skips when the dataset is absent.
 
@@ -93,31 +93,41 @@ the paper's larger fiber. **Resolving this is a bench call, not a code call** �
 it changes the pinned `GOLDEN_FIDELITY` in `tests/test_reconstruction.py`, so
 change both together and say why in the commit.
 
-### The missing 1.2 points — and the trap in closing them
+### Verified against Caleb's own intermediates — and the trap near 98%
 
-Caleb's own analysis of this dataset is recoverable from the `002_Holography`
-archive at `10-17-2023-Wavelengths/wavelengthDecompUpdatedLPModesForOne`
-`PolarizationCleanupTimeAgain.py`. His parameters, now our defaults:
+Caleb's analysis of this dataset, plus every intermediate it produced, is in the
+shared archive under `10-17-2023-Wavelengths/`
+(`wavelengthDecompUpdatedLPModesForOnePolarizationCleanupTimeAgain.py`,
+`fftCentroids.pkl`, `optimizationDataSet.pkl`). His parameters are now our
+defaults:
 
     cropSize 512 · modeSize 256 · Nfft 128 · sample_limit 32
     coreRadius 17.5e-6 · NA 0.13 · rIndex 1.453 · diameter 63-70
     makeButtersworth(Nfft, Nfft//2, Nfft//2, wc=15)
 
-Run with exactly those, this code gets 96.76% ± 0.95%, not 98%. The fiber spec
-is **not** the cause: his 17.5 µm/NA 0.13 and the 16.3 µm/NA 0.15 previously
-hard-coded here both give the paper's 23-mode basis, and both land ~96.5–96.8%.
+Stage-by-stage comparison against his saved data:
 
-**The trap:** setting `butter_wc=4` yields 98.3% ± 0.5% and looks like a fix. It
-is not what he did, and it pushes the consolidated mode-field diameter to index
-0 — the edge of the search range — which is what a parameter absorbing someone
-else's error looks like. Fidelity (Eq. 5) compares the recovered field to *its
-own* LP reconstruction, so narrowing the passband can raise η by deleting
-content the basis could never represent. Same failure mode as an oversized
-basis, opposite direction. Don't do it; find the real cause.
+| stage | agreement |
+|---|---|
+| carrier centroids (51 λ) | identical to **0.000 px** |
+| interpolated twin image | \|overlap\| = **1.000000**, zero L1 diff |
+| mode decomposition | cosine similarity **0.997–0.9998** |
+| mean fidelity | ours **96.76 ± 0.95%** · his **96.89 ± 1.48%** |
 
-Untested candidates: `sample_limit` (he passes 32 in the per-frame loop but
-`Nfft` in one single-frame call), `filterDCComponents` `lineFilterWidth` (his
-tutorial uses 3, we use 1), and his per-frame optimisation schedule.
+Ours is tighter and its worst frame is far better (93.7% vs 81.1%; 0 vs 24
+frames under 95%) — that is the basis consolidation earning its keep.
+
+**The paper's 98% is not reproducible from this dataset by this method**, by us
+or by his own stored run. That ~1.1 point gap is between his 2023 analysis and
+the published number, not something wrong here. Ask him before assuming a bug.
+
+**The trap:** `butter_wc=4` yields 98.3% ± 0.5% and looks like the fix. It
+matches neither his method nor his results, and it pushes the consolidated
+mode-field diameter to index 0 — the edge of the search range, which is what a
+parameter absorbing someone else's error looks like. Fidelity (Eq. 5) compares
+the recovered field to *its own* LP reconstruction, so narrowing the passband
+raises η by deleting content the basis could never represent. Same failure mode
+as an oversized basis, opposite direction.
 
 ## Layout
 

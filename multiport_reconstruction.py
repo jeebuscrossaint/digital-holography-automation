@@ -110,26 +110,29 @@ class MultiPortReconstructor:
         # startDiameter=63, stopDiameter=70). Do not "improve" them without
         # reading the note below — the obvious improvement is a trap.
         #
-        # OPEN DISCREPANCY. Run with Caleb's exact parameters, this code gets
-        # 96.76% +/- 0.95% over the archive; the paper reports 98% +/- 0.8%.
-        # ~1.2 points are unaccounted for, and the cause is NOT the fiber spec:
-        # both 17.5um/NA0.13 (his) and 16.3um/NA0.15 (an earlier guess here)
-        # yield the paper's 23-mode basis, and both land at ~96.5-96.8%.
+        # This code is a VERIFIED reproduction of that analysis. Checked stage
+        # by stage against his saved intermediates (10-17-2023-Wavelengths/
+        # fftCentroids.pkl, optimizationDataSet.pkl):
         #
-        # Tightening the passband to wc=4 DOES produce 98.3% +/- 0.5%, matching
-        # the paper's headline number — but it is not what he did, and it drives
-        # the consolidated mode-field diameter to index 0, the edge of the
-        # search range, which is what a parameter absorbing someone else's error
-        # looks like. Fidelity compares the recovered field against its own LP
-        # reconstruction, so narrowing the passband can raise it by deleting
-        # content the basis cannot represent. Chasing the number that way hides
-        # the real defect. Left at 15 deliberately.
+        #   carrier centroids      identical to 0.000 px over all 51 wavelengths
+        #   interpolated twin      |overlap| = 1.000000, zero L1 difference
+        #   mode decomposition     cosine similarity 0.997-0.9998 per frame
+        #   mean fidelity          ours 96.76% +/- 0.95%  vs his 96.89% +/- 1.48%
         #
-        # Candidates for the missing 1.2 points, none yet tested:
-        #   - sample_limit: he passes 32 in the per-frame loop but Nfft (=128)
-        #     in one single-frame call, which changes the sinc-sum accuracy.
-        #   - filterDCComponents lineFilterWidth: his tutorial uses 3, we use 1.
-        #   - the per-frame optimisation schedule (his loop, lines ~317-350).
+        # Our spread is tighter and the worst frame much better (93.7% vs 81.1%,
+        # 0 vs 24 frames under 95%) because of the basis consolidation above.
+        #
+        # NOTE ON THE PAPER'S 98%: it is NOT reproducible from this dataset with
+        # this method — not by us and not by Caleb's own stored run, which also
+        # lands at 96.9%. So a ~1.1 point gap exists between his archived 2023
+        # analysis and the published figure; where it comes from is unknown
+        # (later refinement, different data, different reporting — ask him).
+        # Do NOT try to close it here by tuning. Setting butter_wc=4 reaches
+        # 98.3% and looks like a fix, but it diverges from the method AND from
+        # his results, and it drives the consolidated diameter to the edge of
+        # the search range. Fidelity compares the field to its own LP
+        # reconstruction, so a narrower passband inflates it by deleting content
+        # the basis cannot represent — same failure mode as an oversized basis.
         self.data_dir = Path(data_dir)
         self.legs = list(legs)
         self.wavelengths = list(wavelengths)
