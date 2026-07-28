@@ -18,10 +18,18 @@ from information that only exists across a FULL leg × wavelength sweep:
      demodulation leaves no residual phase ramp.
   4. Per-frame refinement  — iterate mode-field diameter, quadratic-phase
      factor, and x/y offset to maximise the LP-mode overlap (fidelity).
+  5. Basis consolidation  — average those optima across all ports/wavelengths
+     (linear fit in lambda for the quadratic phase) and re-decompose, so every
+     frame of the sweep shares ONE mode basis. Without this the transfer matrix
+     is assembled from mutually incomparable coefficients.
 
-Validated against Caleb Dobias's archived 19-port × 51-wavelength dataset:
-with the tuned 23-mode basis (see __init__) it reaches ~97% mean fidelity
-(95.6–98.3% per frame) — the paper's number — vs ~92% single-frame.
+Measured against Caleb Dobias's archived 19-port × 51-wavelength dataset
+(``_caleb_ref/10-17-2023-Wavelengths``), using his own parameters and the
+23-mode basis: **96.76% ± 0.95%**. The paper reports 98% ± 0.8%, so roughly
+1.2 points are still unexplained — see the OPEN DISCREPANCY note in
+``__init__``, and do not close the gap by tightening ``butter_wc``.
+Single-frame reconstruction reaches ~97% on one frame and cannot produce a
+coherent transfer matrix at all.
 
 Ready for the new fiber switch: point it at a leg×wavelength sweep directory
 and it returns per-(port, wavelength) fidelity, mode decomposition, and the
@@ -64,7 +72,8 @@ class MultiPortReconstructor:
         ``"time 0 leg {leg} wavelength {wl}nm.npy"`` (Caleb's archive) or
         ``"leg{leg:02d}-wavelength{wl:04d}.npy"`` (this app's collector).
     crop_size, nfft : working FFT sizes (paper: 512 crop, 128 interp grid)
-    core_radius, NA, n_eff : fiber params (paper: 16.3 µm, 0.13, 1.453)
+    core_radius, NA, n_eff : fiber params. Defaults are Caleb's published
+        values for this dataset (17.5 µm, 0.13, 1.453) -> a 23-mode basis.
     diameter_range : (start, stop) mode-field-diameter scan in px (paper 55–75)
     pol_half : 'left'/'right'/None — for dual-polarisation frames, zero one
         half so only one polarisation's field is reconstructed (paper zeros the
@@ -75,24 +84,52 @@ class MultiPortReconstructor:
     def __init__(self, data_dir, legs, wavelengths,
                  filename_fmt="time 0 leg {leg} wavelength {wl}nm.npy",
                  crop_size=512, nfft=128, mode_size=256,
-                 core_radius=16.3e-6, NA=0.15, n_eff=1.453,
-                 diameter_range=(55, 75), pol_half="right",
-                 ref_wavelength=1545, butter_wc=10, sample_limit=32):
-        # NA=0.15 (with core 16.3 µm) gives a 23-mode LP basis — the number the
-        # paper's lantern physically supports. This is THE key fidelity knob:
-        # tuned on Caleb's data it lifts ~95% (his stock NA=0.13 → only 19 modes,
-        # under-counting) to ~97%. Do NOT just crank NA for a bigger number —
-        # NA=0.17 gives 30+ modes and ~98% that is OVERFITTING (more basis
-        # functions than real modes). Match the basis to the lantern's supported
-        # mode count (~23). For a different fiber, set core_radius/NA from its
-        # spec so generateModes() returns ~that many modes. butter_wc=10 is a
-        # slightly tighter twin passband than the paper's 15 (~+0.5%).
+                 core_radius=17.5e-6, NA=0.13, n_eff=1.453,
+                 diameter_range=(63, 70), pol_half="right",
+                 ref_wavelength=1545, butter_wc=15, sample_limit=32):
+        # The defaults describe the PAPER's lantern: core 16.3 µm with NA=0.15
+        # gives a 23-mode LP basis, the number that lantern physically supports.
         #
-        # THIS RIG's lantern is 7-PORT (8 modes) — when running on its own
-        # multi-port sweep, use core_radius=12e-6, NA=0.11 (Caleb's tutorial
-        # values → 8 modes), and size crop_size/nfft to the Bobcat 320 frame
-        # (256 px) rather than the 512/128 defaults (those fit the paper's
-        # 1024×1280 Lucid frames). Validate once real switch data exists.
+        # The basis size is the key fidelity knob, and it is a trap. Match it to
+        # the lantern's real mode count — do NOT raise NA to chase a bigger
+        # number. NA=0.17 here yields 30+ modes and ~98% fidelity that is pure
+        # OVERFITTING: more basis functions than there are guided modes, so the
+        # extra ones absorb noise. For a different fiber, set core_radius/NA
+        # from its spec and check how many modes generateModes() returns.
+        #
+        # THIS RIG's lantern is 7-port (8 modes): core_radius=12e-6, NA=0.11,
+        # with crop_size/nfft sized to the Bobcat 320's 256-px frame rather than
+        # the 512/128 defaults (which fit the paper's 1024×1280 Lucid frames).
+        # pipeline.run_multiport passes those. Validate once real switch data
+        # exists.
+        #
+        # butter_wc=15 and diameter_range=(63,70) are CALEB'S VALUES, read from
+        # his own analysis of this dataset
+        # (10-17-2023-Wavelengths/wavelengthDecompUpdatedLPModesForOnePolarization
+        # CleanupTimeAgain.py: makeButtersworth(Nfft, Nfft//2, Nfft//2, wc=15),
+        # startDiameter=63, stopDiameter=70). Do not "improve" them without
+        # reading the note below — the obvious improvement is a trap.
+        #
+        # OPEN DISCREPANCY. Run with Caleb's exact parameters, this code gets
+        # 96.76% +/- 0.95% over the archive; the paper reports 98% +/- 0.8%.
+        # ~1.2 points are unaccounted for, and the cause is NOT the fiber spec:
+        # both 17.5um/NA0.13 (his) and 16.3um/NA0.15 (an earlier guess here)
+        # yield the paper's 23-mode basis, and both land at ~96.5-96.8%.
+        #
+        # Tightening the passband to wc=4 DOES produce 98.3% +/- 0.5%, matching
+        # the paper's headline number — but it is not what he did, and it drives
+        # the consolidated mode-field diameter to index 0, the edge of the
+        # search range, which is what a parameter absorbing someone else's error
+        # looks like. Fidelity compares the recovered field against its own LP
+        # reconstruction, so narrowing the passband can raise it by deleting
+        # content the basis cannot represent. Chasing the number that way hides
+        # the real defect. Left at 15 deliberately.
+        #
+        # Candidates for the missing 1.2 points, none yet tested:
+        #   - sample_limit: he passes 32 in the per-frame loop but Nfft (=128)
+        #     in one single-frame call, which changes the sinc-sum accuracy.
+        #   - filterDCComponents lineFilterWidth: his tutorial uses 3, we use 1.
+        #   - the per-frame optimisation schedule (his loop, lines ~317-350).
         self.data_dir = Path(data_dir)
         self.legs = list(legs)
         self.wavelengths = list(wavelengths)
@@ -117,10 +154,10 @@ class MultiPortReconstructor:
     def _load(self, leg, wl):
         a = np.load(self.data_dir / self.fmt.format(leg=leg, wl=wl)).astype(float)
         # Zero-pad so a crop×crop window fits around ANY beam position. The
-        # Bobcat frame (256×320) is small and the beam often sits low/off-centre,
-        # which otherwise makes cropArray() return a truncated (non-square)
-        # window and crashes the DC filter. Padding is identical for every frame,
-        # so all beam-centre / carrier coordinates stay mutually consistent.
+        # Bobcat frame is small and the beam often sits low/off-centre, which
+        # would otherwise make cropArray() return a truncated (non-square)
+        # window and crash the DC filter. The padding is identical for every
+        # frame, so beam-centre and carrier coordinates stay mutually consistent.
         pad = self.crop // 2
         return np.pad(a, pad, mode="constant")
 
@@ -231,27 +268,115 @@ class MultiPortReconstructor:
         return {"fidelity": fid, "decomp": decomp, "recomp": recomp, "field": adj,
                 "diameter": int(diam), "phase": float(pf), "offset": (int(xo), int(yo))}
 
+    def decompose_frame(self, leg, wl_index, diameter, phase, offset):
+        """Decompose one frame with GIVEN parameters — no per-frame search.
+
+        The counterpart to ``reconstruct_frame``: same field extraction, but the
+        mode-field diameter, quadratic phase and x/y offset are handed in, so
+        every frame is expressed in the same basis."""
+        mbd = self._modes()
+        diameter = int(np.clip(diameter, 0, mbd.shape[0] - 1))
+        field = self.extract_field(leg, wl_index)
+        adj = adjustField(field, phase, offset[0], offset[1])
+        decomp, recomp = decompAndRecomp(adj, mbd[diameter])
+        fid = float(np.real(np.square(np.abs(overlap2FieldsV2(recomp, adj)))))
+        return {"fidelity": fid, "decomp": decomp, "recomp": recomp, "field": adj,
+                "diameter": diameter, "phase": float(phase),
+                "offset": (int(offset[0]), int(offset[1]))}
+
+    def consolidate_parameters(self, per_frame):
+        """Collapse per-frame optima into one basis shared by the whole sweep.
+
+        Paper, Sec. 2: "optimal parameters were averaged across all SM ports and
+        wavelengths ... except for the quadratic phase mask, which instead used a
+        linear fit to address the wavelength dependency."
+
+        The reason is physical, not cosmetic. The mode-field diameter and the
+        field position are properties of the imaging setup — they do not change
+        from port to port — so their per-frame scatter is fit noise and gets
+        averaged away. Defocus genuinely does track wavelength, so the quadratic
+        phase factor k is fit linearly in lambda rather than averaged flat.
+
+        Returns ``(diameter, (x_offset, y_offset), phase_of_wl_index)``.
+        """
+        values = list(per_frame.values())
+        diameter = int(round(float(np.mean([r["diameter"] for r in values]))))
+        xo = int(round(float(np.mean([r["offset"][0] for r in values]))))
+        yo = int(round(float(np.mean([r["offset"][1] for r in values]))))
+
+        idx, phases = [], []
+        for wi in range(len(self.wavelengths)):
+            at_wl = [r["phase"] for (_leg, w), r in per_frame.items() if w == wi]
+            if at_wl:
+                idx.append(wi)
+                phases.append(float(np.mean(at_wl)))
+        if len(idx) >= 2:
+            slope, intercept = np.polyfit(idx, phases, 1)
+            def phase_of(wi):
+                return float(wi * slope + intercept)
+        else:
+            constant = phases[0] if phases else 0.0
+            def phase_of(_wi):
+                return constant
+        return diameter, (xo, yo), phase_of
+
     # ── full sweep → transfer matrices ──────────────────────────────────────────
-    def reconstruct_all(self, progress=None):
+    def reconstruct_all(self, progress=None, consistent_basis=True):
         """Reconstruct every (leg, wavelength). Returns dict with:
         transfer_matrices [n_wl][n_mode, n_leg], fidelity [n_wl, n_leg],
-        and the per-frame results. ``progress`` is an optional callback(str)."""
+        and the per-frame results. ``progress`` is an optional callback(str).
+
+        With ``consistent_basis`` (the paper's procedure, and the default) the
+        sweep is reconstructed twice: once to find each frame's optimum, then
+        again with those optima consolidated by ``consolidate_parameters`` so
+        every frame shares one basis. This matters because the transfer matrix
+        is assembled ACROSS frames — coefficients measured against per-frame
+        bases are not mutually comparable, so the columns of an unconsolidated
+        TM do not describe one physical lantern. Individual fidelities dip
+        slightly (each frame is no longer separately maximised); the TM is what
+        becomes trustworthy.
+
+        Pass ``consistent_basis=False`` to get the raw per-frame optima — useful
+        for reporting the best achievable single-frame fidelity, not for a TM.
+        """
         if self._xC is None:
             self.fit_carrier_centroids()
         nL, nW = len(self.legs), len(self.wavelengths)
         n_mode = self._modes().shape[1]
+
+        # Pass 1 — per-frame optimisation.
+        per_frame = {}
+        for wi in range(nW):
+            for leg in self.legs:
+                r = self.reconstruct_frame(leg, wi)
+                per_frame[(leg, wi)] = r
+                if progress:
+                    progress(f"λ={self.wavelengths[wi]}nm leg={leg} "
+                             f"fidelity={r['fidelity']*100:.1f}%")
+
+        params = None
+        if consistent_basis and per_frame:
+            diameter, offset, phase_of = self.consolidate_parameters(per_frame)
+            params = {"diameter": diameter, "offset": offset}
+            if progress:
+                progress(f"consolidating basis: diameter={diameter} "
+                         f"offset={offset} (phase linear in λ)")
+            # Pass 2 — re-decompose every frame on the shared basis.
+            for (leg, wi) in list(per_frame):
+                per_frame[(leg, wi)] = self.decompose_frame(
+                    leg, wi, diameter, phase_of(wi), offset)
+
         TM = np.zeros((nW, n_mode, nL), dtype=np.complex128)
         fid = np.zeros((nW, nL))
         frames = {}
         for wi in range(nW):
             for li, leg in enumerate(self.legs):
-                r = self.reconstruct_frame(leg, wi)
+                r = per_frame[(leg, wi)]
                 TM[wi, :, li] = r["decomp"]
                 fid[wi, li] = r["fidelity"]
                 frames[(leg, self.wavelengths[wi])] = r
-                if progress:
-                    progress(f"λ={self.wavelengths[wi]}nm leg={leg} "
-                             f"fidelity={r['fidelity']*100:.1f}%")
+
         return {"transfer_matrices": TM, "fidelity": fid, "frames": frames,
                 "legs": self.legs, "wavelengths": self.wavelengths,
-                "carrier_x": self._xC, "carrier_y": self._yC}
+                "carrier_x": self._xC, "carrier_y": self._yC,
+                "basis": params}
