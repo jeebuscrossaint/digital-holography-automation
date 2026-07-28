@@ -54,12 +54,14 @@ processing:
   # core_radius + numerical_aperture determine how many LP modes the basis has,
   # and that should match what the lantern physically supports (an N-port
   # lantern supports ~N modes). These values give 15 modes; the multiport block
-  # below gives 8 for the same lantern. See CLAUDE.md, "Known physics
-  # discrepancy" — resolving it is a call about which lantern is on the bench.
+  # below gives 8 for the same lantern. See CLAUDE.md, "Two open physics
+  # questions" — resolving it is a call about which lantern is on the bench.
   core_radius: 1.7e-05
   numerical_aperture: 0.11
   effective_index: 1.453
-  num_modes: 18         # cap only; the basis is never larger than what NA allows
+  num_modes: 18         # cap only, and it does NOT bind: core_radius/NA above
+                        # yield 15 modes, so the basis is 15. Raising this to 23
+                        # changes nothing; only core_radius/NA change the count.
 
   # --- multiport / cross-port LP basis (multiport_reconstruction.py) ---
   multiport:

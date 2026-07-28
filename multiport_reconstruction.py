@@ -87,8 +87,9 @@ class MultiPortReconstructor:
                  core_radius=17.5e-6, NA=0.13, n_eff=1.453,
                  diameter_range=(63, 70), pol_half="right",
                  ref_wavelength=1545, butter_wc=15, sample_limit=32):
-        # The defaults describe the PAPER's lantern: core 16.3 µm with NA=0.15
+        # The defaults describe the PAPER's lantern: core 17.5 µm with NA=0.13
         # gives a 23-mode LP basis, the number that lantern physically supports.
+        # (Verified: generateModes at these values returns 23.)
         #
         # The basis size is the key fidelity knob, and it is a trap. Match it to
         # the lantern's real mode count — do NOT raise NA to chase a bigger

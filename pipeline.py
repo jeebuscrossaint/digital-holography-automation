@@ -74,7 +74,7 @@ def run_multiport(data_dir, legs, wavelengths, config, log=_noop_log):
     # Fiber parameters for the multiport basis. NOTE these are deliberately a
     # separate config block from `processing.core_radius` (which sizes the
     # single-frame basis) because the two currently disagree about the same
-    # physical lantern — see CLAUDE.md, "Known physics discrepancy".
+    # physical lantern — see CLAUDE.md, "Two open physics questions".
     mp_cfg = (config.get("processing") or {}).get("multiport", {})
     log(f"Multi-leg dataset ({len(legs)} legs) — running multiport "
         f"reconstruction (paper cross-port method)…", "INFO")

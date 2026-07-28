@@ -104,7 +104,8 @@ the result can never be worse than single-frame.
 
 - Camera streaming, laser, motors, acquisition, the fringe auto-optimizer, and
   saturation rejection all work.
-- Single-frame reconstruction reaches **~97%** on the committed test frame.
+- Single-frame reconstruction reaches **0.9717** on the committed test frame
+  (15-mode basis; the 8-mode basis gives 0.9497 on the same frame).
   Pixel scale, mode-field diameter, field position, and the defocus
   quadratic-phase are *optimized numerically* (matching the paper — they are not
   measured on the bench).
@@ -112,7 +113,7 @@ the result can never be worse than single-frame.
   measures a 19-port lantern with a 23-mode basis; this config uses a 15-mode
   basis on what the multiport path treats as a 7-port (8-mode) lantern. An
   oversized basis inflates fidelity by absorbing noise — see **CLAUDE.md,
-  "Known physics discrepancy"**. Resolve the lantern's real mode count before
+  "Two open physics questions"**. Resolve the lantern's real mode count before
   quoting a fidelity against the paper.
 - **Multiport is a verified reproduction of Caleb's analysis.** Over his
   archived 19-port × 51-wavelength dataset it gives **96.76% ± 0.95%** against
