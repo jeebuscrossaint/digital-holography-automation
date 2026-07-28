@@ -14,9 +14,9 @@ Write-Host "============================================================" -Foreg
 Write-Host ""
 Write-Host "Environment ready! Available test commands:" -ForegroundColor Green
 Write-Host ""
-Write-Host "  python tools/quick_camera_test.py        # Test camera only"
-Write-Host "  python tools/test_components.py --camera # Test camera (detailed)"
-Write-Host "  python tools/test_components.py --all     # Test all hardware"
+Write-Host "  uv run pytest                             # Run the test suite"
+Write-Host "  python tools/probe_switch.py              # Probe the fiber switch"
+Write-Host "  python tools/probe_mpc.py                 # Probe the MPC320 paddles"
 Write-Host "  python main.py                            # Launch the app"
 Write-Host ""
 Write-Host "NOTE: If the camera 'connects' but shows no frames, it is the" -ForegroundColor Yellow

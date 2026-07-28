@@ -31,10 +31,11 @@ def main():
         "scipy.signal", "scipy.ndimage", "matplotlib", "PIL", "PIL.Image",
         "pyvisa", "pyvisa_py", "gpib_ctypes", "serial", "serial.tools.list_ports",
         # repo-root modules main.py imports lazily
-        "fringe_detection", "data_processing",
+        "fringe_detection", "data_processing", "multiport_reconstruction",
+        "pipeline",
         # hardware drivers (also bundled as data + reachable via runtime sys.path)
         "XenicsCam", "HPTunableLaserSource", "D700DiconSwitch", "polMotors",
-        "MMF", "calebsUsefulFunctions", "usefulFunctions",
+        "MMF", "calebsUsefulFunctions",
     ]
     collect = ["PySide6", "xenics"]   # packages that ship data files / submodules / Qt plugins
 

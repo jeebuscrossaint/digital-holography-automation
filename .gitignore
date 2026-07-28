@@ -237,6 +237,19 @@ processed_results/
 *_results.npz
 *_analysis.png
 
+# One-off dataset runs + their generated outputs (regenerate from the raw data;
+# the scripts that produced them are in git history, not the working tree).
+6port/
+7port/
+analysis_output/
+_config_*.yaml
+.holo_cache/
+
+# Caleb's shared archive, pulled with rclone (37.5 GiB, 16k files).
+# Reference data — regenerate with: rclone copy od: 002_Holography_full/
+002_Holography_full/
+002_Holography*/
+
 # Experiment logs
 experiment_log.txt
 *.log

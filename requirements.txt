@@ -2,7 +2,7 @@
 #
 # Preferred install is uv (uses pyproject.toml + uv.lock):
 #     uv sync
-# This file is a pip fallback:
+# This file is a pip fallback — keep it in sync with pyproject.toml:
 #     pip install -r requirements.txt
 #
 # Two SDKs install separately (not on PyPI) — see LAB_SETUP.md:
@@ -17,11 +17,11 @@ matplotlib>=3.10.8
 pyyaml>=6.0.3
 pillow>=8.0.0
 
+# GUI — PySide6 (Qt6)
+pyside6>=6.11.0
+
 # Hardware communication
 pyserial>=3.5
 pyvisa>=1.11.0
 pyvisa-py>=0.5.0
 gpib-ctypes>=0.3.0
-
-# tkinter app — Windows 11 Fluent theme
-sv-ttk>=2.6.0
