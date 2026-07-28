@@ -27,6 +27,14 @@ change behaviour there, not in a front end.
 
 `uv run pytest` — fast, no hardware.
 
+**Exploring: use `git ls-files`, never `find` or `ls -R`.** 93 files are tracked;
+the working tree holds ~17,500, because `002_Holography_full/` (16k files, 37 GB)
+and `_caleb_ref/` are gitignored reference data that `tests/test_multiport.py`
+reads. `find . -type f` emits 2.3 MB and will eat your context; `git ls-files` is
+2.4 KB. Grep/ripgrep already honour `.gitignore` and are safe. Those trees also
+contain multi-GB `.spydata`/`.pkl` binaries and filenames with spaces — never
+`cat`/`head` into them, and quote any path you pass to a shell.
+
 ## Traps
 
 - **Don't sqrt the intensity** before the FFT. FFT the raw frame.
@@ -47,6 +55,12 @@ change behaviour there, not in a front end.
 lantern has ~N modes, so a 7-port rig means 8 and the extra 7 just absorb noise
 and inflate fidelity (measured: 15 modes 0.9717, 8 modes 0.9497 on the same
 frame). Needs the bench answer, then update `GOLDEN_FIDELITY` in the same commit.
+
+A third parameter set exists and is *not* a fourth opinion: the
+`MultiPortReconstructor` signature defaults to 17.5e-6 / 0.13 → **23 modes**,
+which is the *paper's* 19-port lantern, used only by `tests/test_multiport.py`
+against Caleb's archive. `pipeline.run_multiport` overrides it to this rig's
+1.2e-5 / 0.11. Don't "reconcile" those two — they describe different lanterns.
 
 **2. Don't chase the paper's 98%.** Multiport gets 96.76% on Caleb's archive;
 his own saved run gets 96.89%. We match him — carrier centroids identical to
