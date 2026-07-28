@@ -23,8 +23,16 @@ from conftest import FIXTURES
 # 100 -> 200): the old 100-px window cropped the mode's outer structure off and
 # capped fidelity (Caleb's "still very zoomed in"). Bigger window captures the
 # full field. Grid 100 -> 200 to match.
-GOLDEN_FIDELITY = 0.9770
-FIDELITY_TOL    = 0.02      # absolute; FP/platform slack, still catches real breaks
+# 2026-07-28: 0.9770 -> 0.9717, re-measured. The constant had drifted from what
+# the code actually produces and the +/-0.02 tolerance was hiding it, so the
+# "golden" number silently disagreed with both CLAUDE.md and a real run. 0.9717
+# is the measured value of the default (15-mode) config on this fixture.
+GOLDEN_FIDELITY = 0.9717
+FIDELITY_TOL    = 0.005     # absolute. Was 0.02, which was wide enough to hide a
+                            # 0.0053 drift in the constant itself for weeks. The
+                            # search is deterministic, so anything above FP noise
+                            # is a real change — if this trips on the lab box,
+                            # that is information, not flake.
 GRID            = 200       # processor's reconstruction grid size (= crop_size)
 
 
