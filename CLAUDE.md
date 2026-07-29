@@ -64,10 +64,17 @@ which is the *paper's* 19-port lantern, used only by `tests/test_multiport.py`
 against Caleb's archive. `pipeline.run_multiport` overrides it to this rig's
 1.2e-5 / 0.11. Don't "reconcile" those two — they describe different lanterns.
 
-**2. Don't chase the paper's 98%.** Multiport gets 96.76% on Caleb's archive;
+**2. Don't chase the paper's 98%.** Multiport gets 96.7% on Caleb's archive;
 his own saved run gets 96.89%. We match him — carrier centroids identical to
 0.000 px, twin image |overlap| 1.000000, decomposition cosine sim 0.997-0.9998
 (`tests/test_multiport.py`). The gap to the printed 98% is between his 2023
 analysis and the paper, not a bug here. Setting `butter_wc=4` "fixes" it to
 98.3% by deleting field content the basis can't represent — same overfitting as
 too many modes. Defaults are his published values; leave them.
+
+**Always say how many frames a fidelity covers.** `tests/test_multiport.py` and
+the old notes here measured 3 wavelengths x 19 legs = **57 frames**: 96.76% +/-
+0.95%, worst 93.7%. The full 51 x 19 = **969 frames** gives 96.68% +/- 1.58%,
+worst **80.0%**, 37 frames under 95%. The mean is stable, the tail is not, and
+the 57-frame row was being quoted as if it covered the archive. A full sweep is
+~10 min (`reconstruct_all`, 0.6 s/frame) — cheap enough to just run.

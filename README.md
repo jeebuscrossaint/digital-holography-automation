@@ -115,12 +115,23 @@ the result can never be worse than single-frame.
   oversized basis inflates fidelity by absorbing noise — see **CLAUDE.md,
   "Two open physics questions"**. Resolve the lantern's real mode count before
   quoting a fidelity against the paper.
-- **Multiport is a verified reproduction of Caleb's analysis.** Over his
-  archived 19-port × 51-wavelength dataset it gives **96.76% ± 0.95%** against
-  his own stored **96.89% ± 1.48%** — with identical carrier centroids (0.000 px),
-  an identical interpolated twin image (\|overlap\| = 1.000000), and mode
-  decompositions matching to 0.997–0.9998 cosine similarity. Our worst frame is
-  93.7% where his is 81.1%, thanks to the consolidated basis.
+- **Multiport is a verified reproduction of Caleb's analysis.** Carrier centroids
+  identical to 0.000 px, an identical interpolated twin image
+  (\|overlap\| = 1.000000), and mode decompositions matching to 0.997–0.9998
+  cosine similarity. On fidelity, **quote the scope with the number**:
+
+  | consolidated run | frames | mean | σ | worst | < 95% |
+  |---|---|---|---|---|---|
+  | 3 λ (1525/1550/1575) × 19 legs | 57 | 96.76% | 0.95% | 93.7% | 1 |
+  | **full 51 λ × 19 legs** | **969** | **96.68%** | **1.58%** | **80.0%** | **37** |
+
+  The mean is stable across both (96.7%), so the reproduction holds. The spread
+  is not: over the full sweep σ is 1.58% and 37 frames fall below 95% (10 below
+  90%). Earlier revisions of this file quoted the 57-frame row as if it covered
+  the whole archive and concluded the consolidated basis beat Caleb's worst
+  frame (81.1%, 24 under 95%). On the full sweep it does not — 80.0% is his
+  worst, near enough. Whether his figures span 57 or 969 frames is unrecorded,
+  so treat that comparison as open rather than won.
 - **The paper's printed 98% ± 0.8% is not reproducible from that dataset** — not
   here and not by Caleb's own saved run, which also lands at 96.9%. The ~1.1
   point difference sits between his 2023 analysis and the published figure.
