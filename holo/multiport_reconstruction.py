@@ -25,7 +25,13 @@ from information that only exists across a FULL leg × wavelength sweep:
 
 Measured against Caleb Dobias's archived 19-port × 51-wavelength dataset
 (``_caleb_ref/10-17-2023-Wavelengths``), using his own parameters and the
-23-mode basis: **96.76% ± 0.95%**. The paper reports 98% ± 0.8%, so roughly
+23-mode basis. Quote the scope with the number:
+
+    3 lambda x 19 legs  =  57 frames   96.76% +/- 0.95%, worst 93.7%
+    full 51 x 19        = 969 frames   96.68% +/- 1.58%, worst 80.0%,
+                                       37 frames under 95%
+
+The mean is stable; the tail is not. The paper reports 98% ± 0.8%, so roughly
 1.2 points are still unexplained — see the OPEN DISCREPANCY note in
 ``__init__``, and do not close the gap by tightening ``butter_wc``.
 Single-frame reconstruction reaches ~97% on one frame and cannot produce a
@@ -36,18 +42,12 @@ and it returns per-(port, wavelength) fidelity, mode decomposition, and the
 assembled transfer matrices.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import scipy
 
-_ROOT = Path(__file__).parent
-_lib = str(_ROOT / "lib")
-if _lib not in sys.path:
-    sys.path.insert(0, _lib)
-
-from calebsUsefulFunctions import (  # noqa: E402
+from .lib.calebsUsefulFunctions import (
     generateMask, cropArray, filterDCComponents, makeButterworth,
     fourier_interp_2d, generateModesByDiameter, adjustField, findBestDiameter,
     findBestPhase, findBestOffset, decompAndRecomp, overlap2FieldsV2,
@@ -118,10 +118,14 @@ class MultiPortReconstructor:
         #   carrier centroids      identical to 0.000 px over all 51 wavelengths
         #   interpolated twin      |overlap| = 1.000000, zero L1 difference
         #   mode decomposition     cosine similarity 0.997-0.9998 per frame
-        #   mean fidelity          ours 96.76% +/- 0.95%  vs his 96.89% +/- 1.48%
+        #   mean fidelity          ours 96.68% (969 frames) vs his 96.89%
         #
-        # Our spread is tighter and the worst frame much better (93.7% vs 81.1%,
-        # 0 vs 24 frames under 95%) because of the basis consolidation above.
+        # On the 57-frame subset the tests use, ours is 96.76% +/- 0.95% with a
+        # worst frame of 93.7%. Do NOT generalise that to the archive: over all
+        # 969 frames the spread is 1.58% and the worst frame is 80.0%, which is
+        # essentially his 81.1%. The earlier claim that consolidation beat his
+        # worst frame came from quoting the subset as if it were the whole
+        # sweep. Whether his figures span 57 or 969 frames is unrecorded.
         #
         # NOTE ON THE PAPER'S 98%: it is NOT reproducible from this dataset with
         # this method — not by us and not by Caleb's own stored run, which also

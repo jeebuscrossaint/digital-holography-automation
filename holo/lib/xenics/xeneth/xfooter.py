@@ -3,7 +3,7 @@ xfooters.py
 Footer classes
 """
 
-from xenics.xeneth.capi.structs import XPFF_GENERIC
+from holo.lib.xenics.xeneth.capi.structs import XPFF_GENERIC
 
 class PFFGeneric():
     """

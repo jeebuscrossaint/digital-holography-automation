@@ -118,7 +118,7 @@ class ExperimentMixin:
     def _run_collection(self, cb):
         import numpy as np
         import yaml
-        from fringe_detection import (check_fringes_visible,
+        from holo.fringe_detection import (check_fringes_visible,
                                        optimize_polarization_for_fringes,
                                        check_saturation)
 
@@ -293,7 +293,7 @@ class ExperimentMixin:
         import re
         import yaml
 
-        import pipeline
+        from holo import pipeline
 
         cb({"type": "log",  "text": "Starting data processing…", "level": "INFO"})
         cb({"type": "progress", "status": "Loading processor…", "percent": 0})
@@ -302,7 +302,7 @@ class ExperimentMixin:
             cb({"type": "log", "text": text, "level": level})
 
         try:
-            from data_processing import HolographyDataProcessor
+            from holo.data_processing import HolographyDataProcessor
             proc = HolographyDataProcessor(config_file=CONFIG_FILE)
         except Exception as e:
             log(f"Processor init failed: {e}", "ERROR")

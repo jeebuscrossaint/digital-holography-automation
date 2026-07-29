@@ -16,31 +16,34 @@ better by averaging the carrier across ports, and ``pipeline`` picks between
 them. To process a folder, use ``process.py``.
 """
 
-import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
 from pathlib import Path
 from scipy import ndimage, signal
 
-_ROOT = Path(__file__).parent
-_lib = str(_ROOT / 'lib')
-if _lib not in sys.path:
-    sys.path.insert(0, _lib)
-
-from calebsUsefulFunctions import (  # noqa: E402
+from .lib.calebsUsefulFunctions import (
     pltBoth, generateModes, filterDCComponents, generatePhaseMask, modeDecomp,
     combinedOutput, normalizeIntensity, overlap2FieldsV2, findBestOffset,
     generateMask, makeButterworth, getMaxIndex, getBlurredCentroid, rollMatrix,
 )
 
+_ROOT = Path(__file__).parent
+
 
 class HolographyDataProcessor:
     """Automated processor for holography data"""
     
-    def __init__(self, config_file='experiment_config.yaml'):
-        """Initialize processor with configuration"""
-        # Load configuration
+    def __init__(self, config_file=None):
+        """Initialize processor with configuration.
+
+        ``config_file=None`` resolves the app's config next to the repo root
+        (or next to the .exe in a frozen build) rather than relative to the
+        current directory, so the engine works from anywhere.
+        """
+        if config_file is None:
+            from .runtime import CONFIG_FILE
+            config_file = CONFIG_FILE
         with open(config_file, 'r') as f:
             self.config = yaml.safe_load(f)
         

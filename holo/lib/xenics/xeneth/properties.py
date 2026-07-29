@@ -7,8 +7,8 @@ Dynamic property access for XCamera
 from abc import ABC, abstractmethod
 import ctypes
 from pathlib import Path
-from xenics.xeneth.capi.errors import XErrorCodes
-from xenics.xeneth.capi.functions import (
+from holo.lib.xenics.xeneth.capi.errors import XErrorCodes
+from holo.lib.xenics.xeneth.capi.functions import (
     XC_GetPropertyBlob, XC_GetPropertyRangeE, XC_GetPropertyRangeF,
     XC_GetPropertyUnit, XC_GetPropertyValue,
     XC_GetPropertyValueE, XC_GetPropertyValueF,
@@ -17,7 +17,7 @@ from xenics.xeneth.capi.functions import (
     XC_SetPropertyValueF, XC_SetPropertyValueL
     )
 
-from xenics.xeneth.capi.util import (
+from holo.lib.xenics.xeneth.capi.util import (
     _create_property_enum_value_buffer,
     _create_property_string_value_buffer)
 

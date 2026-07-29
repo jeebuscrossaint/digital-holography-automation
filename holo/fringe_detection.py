@@ -4,19 +4,18 @@ Fringe Visibility Detection for Digital Holography
 Used to determine if interference fringes are visible in camera images
 """
 
-import os
-import sys
 import numpy as np
 
 
 def _fft_helpers():
-    """Lazily import the FFT helpers from lib/ so the optimizer's notion of
-    'good fringes' matches the reconstruction pipeline exactly."""
-    lib = os.path.join(os.path.dirname(__file__), "lib")
-    if os.path.isdir(lib) and lib not in sys.path:
-        sys.path.insert(0, lib)
-    from calebsUsefulFunctions import (filterForQuadrant, filterDCComponents,
-                                        getBlurredCentroid, getMaxIndex)
+    """Lazily import the FFT helpers so the optimizer's notion of 'good
+    fringes' matches the reconstruction pipeline exactly.
+
+    Lazy because this module is imported by the GUI on the camera path, where
+    a mode-math import would be dead weight until the optimizer actually runs.
+    """
+    from .lib.calebsUsefulFunctions import (filterForQuadrant, filterDCComponents,
+                                            getBlurredCentroid, getMaxIndex)
     return filterForQuadrant, filterDCComponents, getBlurredCentroid, getMaxIndex
 
 

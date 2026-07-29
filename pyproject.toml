@@ -1,6 +1,6 @@
 [project]
 name = "digital-holography-automation"
-version = "0.1.0"
+version = "0.2.0"
 description = "Photonic Lantern Digital Holography Automation — UCF CREOL"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -17,11 +17,25 @@ dependencies = [
     "scipy>=1.17.1",
 ]
 
+[project.scripts]
+holo = "holo.cli:main"
+
 [dependency-groups]
 dev = [
     "pyinstaller>=6.20.0",
     "pytest>=8.0.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# holo/ is the library; gui/ is a front end over it and ships alongside.
+packages = ["holo", "gui"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"experiment_config.yaml" = "holo/experiment_config.yaml"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

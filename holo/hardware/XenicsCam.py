@@ -2,9 +2,9 @@
 # Match Caleb's working driver exactly — only diagnostic logging added.
 import os
 import sys
-from xenics.xeneth import *
-from xenics.xeneth.errors import XenethAPIException, XenethException
-from xenics.xeneth.xcamera import XCamera
+from ..lib.xenics.xeneth import *
+from ..lib.xenics.xeneth.errors import XenethAPIException, XenethException
+from ..lib.xenics.xeneth.xcamera import XCamera
 
 
 def dev_discovery():

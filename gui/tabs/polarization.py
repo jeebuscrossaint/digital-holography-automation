@@ -196,7 +196,7 @@ class PolarizationTabMixin:
 
     def _auto_optimize_worker(self, method=None):
         try:
-            from fringe_detection import optimize_polarization_for_fringes
+            from holo.fringe_detection import optimize_polarization_for_fringes
             fd = self.config.get("experiment", {}).get("fringe_detection", {})
             pol = self.config.get("experiment", {}).get("polarization", {})
             motors_cfg = self.config.get("hardware", {}).get(

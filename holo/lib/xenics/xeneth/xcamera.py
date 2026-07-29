@@ -6,26 +6,26 @@ XenEth camera class
 
 from typing import Any, Union, Tuple
 
-from xenics.xeneth.capi.errors import XErrorCodes
-from xenics.xeneth.util import handle_c_call
-from xenics.xeneth.util import _log as logger
+from holo.lib.xenics.xeneth.capi.errors import XErrorCodes
+from holo.lib.xenics.xeneth.util import handle_c_call
+from holo.lib.xenics.xeneth.util import _log as logger
 
 # too many functions to import without wildcard
 # pylint: disable=wildcard-import
 # pylint: disable=unused-wildcard-import
-from xenics.xeneth.capi.functions import *
-from xenics.xeneth.properties import *
-from xenics.xeneth.capi.enums import *
-from xenics.xeneth.errors import *
+from holo.lib.xenics.xeneth.capi.functions import *
+from holo.lib.xenics.xeneth.properties import *
+from holo.lib.xenics.xeneth.capi.enums import *
+from holo.lib.xenics.xeneth.errors import *
 
 
-from xenics.xeneth.capi.util import (
+from holo.lib.xenics.xeneth.capi.util import (
     _create_property_category_buffer,
     _create_property_name_buffer,
     _create_property_string_value_buffer,
     _create_property_unit_buffer)
 
-from xenics.xeneth.xframebuffer import XFrameBuffer
+from holo.lib.xenics.xeneth.xframebuffer import XFrameBuffer
 
 
 # only export XCamera class

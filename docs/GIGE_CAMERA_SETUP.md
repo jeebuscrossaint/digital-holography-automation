@@ -144,10 +144,7 @@ camera:
 ### Method 3: Full Python Test
 
 ```python
-import sys
-sys.path.append(r'Code That Connects To Other Code\Code That Connects To Other Code')
-
-from XenicsCam import xCam, dev_discovery
+from holo.hardware.XenicsCam import xCam, dev_discovery
 
 # Discover
 url = dev_discovery()

@@ -11,12 +11,30 @@ facts you can't check (lantern port count, fiber spec).
 
 ## Where things are
 
+`holo/` is the library — all the physics. `gui/` and `holo/cli.py` are two
+front ends over it and neither may hold analysis logic.
+
 ```
-main.py        launcher            pipeline.py    <- change processing HERE
-gui/           PySide6 app         process.py     headless CLI over a folder
-hardware/      instrument drivers  data_processing.py        single-frame engine
-lib/           LP modes, FFT math  multiport_reconstruction.py  cross-port + TM
+holo/
+  pipeline.py                  <- change processing HERE
+  data_processing.py           single-frame engine
+  multiport_reconstruction.py  cross-port + transfer matrix
+  fringe_detection.py          fringe metric + polarization optimizer
+  discovery.py                 folder -> records (leg, wavelength, staging)
+  config.py  runtime.py        config loading; frozen paths + Xeneth DLL
+  cli.py                       the `holo` command
+  lib/                         LP modes, FFT math, vendored Xeneth SDK
+  hardware/                    instrument drivers
+gui/           PySide6 app     main.py   GUI launcher
 ```
+
+```
+holo process ./data      reconstruct a folder      holo doctor   check install
+holo tm ./data -o tm.npz transfer matrix -> .npz   holo probe switch
+```
+
+`uv run holo <cmd>`, or `python -m holo`. `process.py` is a deprecated shim for
+`holo process`.
 
 Two reconstruction engines. Single-frame sees one hologram, so it estimates the
 carrier from that frame alone. Multiport needs >=2 legs and is far better: the

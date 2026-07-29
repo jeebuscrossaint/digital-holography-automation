@@ -69,7 +69,7 @@ def run_multiport(data_dir, legs, wavelengths, config, log=_noop_log):
     Returns ``{(leg, wl): frame_result}``, or ``{}`` if it could not run — the
     caller then just uses single-frame results.
     """
-    from multiport_reconstruction import MultiPortReconstructor
+    from .multiport_reconstruction import MultiPortReconstructor
 
     # Fiber parameters for the multiport basis. NOTE these are deliberately a
     # separate config block from `processing.core_radius` (which sizes the

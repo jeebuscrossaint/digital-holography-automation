@@ -6,10 +6,10 @@ Defines C API function imports.
 
 import ctypes
 
-from xenics.xeneth.capi.structs import XDeviceInformation
+from holo.lib.xenics.xeneth.capi.structs import XDeviceInformation
 
 # import dll
-from xenics.xeneth.capi import xenethdll
+from holo.lib.xenics.xeneth.capi import xenethdll
 
 # -----------------------
 # XCD Discovery Functions

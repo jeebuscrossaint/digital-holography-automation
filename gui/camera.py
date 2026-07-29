@@ -45,7 +45,7 @@ class CameraMixin:
         the SDK keeps returning no frames (so the user can see the difference
         between 'no light' and 'no frames at all')."""
         import numpy as np
-        from fringe_detection import check_saturation
+        from holo.fringe_detection import check_saturation
         val = self.config.get("experiment", {}).get("validation", {})
         sat_level    = float(val.get("saturation_level", 65535))
         sat_frac_max = float(val.get("max_saturated_fraction", 0.001))

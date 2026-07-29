@@ -21,14 +21,14 @@ CENTROIDS = CALEB_OUT / "fftCentroids.pkl"
 
 
 def test_module_imports():
-    import multiport_reconstruction as m
+    import holo.multiport_reconstruction as m
     assert hasattr(m, "MultiPortReconstructor")
 
 
 @pytest.mark.skipif(not CALEB.exists(),
                     reason="Caleb reference dataset not present (gitignored, multi-GB)")
 def test_multiport_beats_single_frame():
-    from multiport_reconstruction import MultiPortReconstructor
+    from holo.multiport_reconstruction import MultiPortReconstructor
     # A few wavelengths near 1575 nm keeps the carrier fit fast; all 19 legs so
     # the cross-port averaging is real.
     R = MultiPortReconstructor(data_dir=CALEB, legs=range(19),
@@ -56,7 +56,7 @@ def test_consolidated_basis_matches_measured_fidelity():
     If this rises because the twin passband was narrowed, that is the metric
     being gamed, not a fix.
     """
-    from multiport_reconstruction import MultiPortReconstructor
+    from holo.multiport_reconstruction import MultiPortReconstructor
     R = MultiPortReconstructor(data_dir=CALEB, legs=range(19),
                                wavelengths=[1525, 1550, 1575])
     out = R.reconstruct_all(consistent_basis=True)
@@ -80,7 +80,7 @@ def test_default_params_match_calebs_published_analysis():
     PolarizationCleanupTimeAgain.py. They are easy to 'tune' into a better
     fidelity number and thereby stop reproducing the paper's method.
     """
-    from multiport_reconstruction import MultiPortReconstructor
+    from holo.multiport_reconstruction import MultiPortReconstructor
     R = MultiPortReconstructor(data_dir=CALEB, legs=[0], wavelengths=[1550])
     assert R.butter_wc == 15
     assert R.diameter_range == (63, 70)
@@ -103,8 +103,8 @@ def test_field_recovery_matches_calebs_saved_intermediates():
     """
     import pickle
     import numpy as np
-    from multiport_reconstruction import MultiPortReconstructor
-    from calebsUsefulFunctions import (fourier_interp_2d, makeButterworth,
+    from holo.multiport_reconstruction import MultiPortReconstructor
+    from holo.lib.calebsUsefulFunctions import (fourier_interp_2d, makeButterworth,
                                        cropArray, overlap2FieldsV2)
 
     with open(CENTROIDS, "rb") as f:

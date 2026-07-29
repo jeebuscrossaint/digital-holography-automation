@@ -6,7 +6,7 @@ Utility functions and classes.
 
 import logging
 
-from xenics.xeneth.errors import XenethAPIException
+from holo.lib.xenics.xeneth.errors import XenethAPIException
 
 _log = logging.getLogger("xenics.xeneth")
 _log.addHandler(logging.NullHandler())

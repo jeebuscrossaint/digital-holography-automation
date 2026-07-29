@@ -4,10 +4,10 @@ XFrameBuffer class
 
 import math
 import numpy as np
-from xenics.xeneth.capi.enums import XFrameType
-from xenics.xeneth.capi.structs import XPFF_GENERIC
-from xenics.xeneth.errors import XenethException
-from xenics.xeneth.xfooter import PFFGeneric
+from holo.lib.xenics.xeneth.capi.enums import XFrameType
+from holo.lib.xenics.xeneth.capi.structs import XPFF_GENERIC
+from holo.lib.xenics.xeneth.errors import XenethException
+from holo.lib.xenics.xeneth.xfooter import PFFGeneric
 
 
 class XFrameBuffer(object):

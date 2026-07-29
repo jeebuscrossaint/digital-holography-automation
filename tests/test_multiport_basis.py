@@ -14,7 +14,7 @@ results — no dataset needed, so they run everywhere.
 import numpy as np
 import pytest
 
-from multiport_reconstruction import MultiPortReconstructor
+from holo.multiport_reconstruction import MultiPortReconstructor
 
 
 @pytest.fixture

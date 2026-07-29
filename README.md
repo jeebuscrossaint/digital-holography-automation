@@ -66,20 +66,52 @@ the camera firewall rule — see **[LAB_SETUP.md](LAB_SETUP.md)**.
 
 ## Repository layout
 
+`holo/` is the library — every line of physics lives there. The desktop app and
+the `holo` command are two front ends over it, and neither contains analysis
+code of its own, so they can never drift apart.
+
 ```
-main.py                     app launcher (thin entry point)
+holo/                          THE LIBRARY
+  pipeline.py                  combines both engines — change processing here
+  data_processing.py           single-frame reconstruction + LP decomposition
+  multiport_reconstruction.py  cross-port (paper-fidelity) reconstruction + TM
+  fringe_detection.py          fringe metric + polarization auto-optimizer
+  discovery.py                 folder -> records; frame loading and staging
+  config.py                    config loading
+  runtime.py                   frozen-build paths + Xeneth DLL bootstrap
+  cli.py                       the `holo` command
+  lib/                         LP modes, FFT math, vendored Xeneth SDK
+  hardware/                    drivers (laser, camera, switch, motors)
+
 gui/                        PySide6 (Qt6) app — window, tabs, acquisition loop
-pipeline.py                 processing pipeline shared by the GUI and the CLI
-process.py                  headless CLI: point it at any folder of holograms
-data_processing.py          single-frame reconstruction + LP-mode decomposition
-multiport_reconstruction.py cross-port (paper-fidelity) reconstruction + TM
-fringe_detection.py         fringe metric + polarization auto-optimizer
-hardware/                   instrument drivers (laser, camera, switch, motors)
-lib/                        LP-mode generation + FFT helpers (MMF, Caleb's funcs)
+main.py                     GUI launcher (thin entry point)
 tools/                      build script + hardware probes
 tests/                      golden-file + unit tests (`uv run pytest`)
 experiment_config.yaml      instrument addresses + sweep parameters
 docs/                       setup guides (GigE camera, Xeneth SDK)
+```
+
+## Command line
+
+```sh
+holo process ./data              # reconstruct a folder of holograms
+holo tm ./data -o tm.npz         # reconstruct + export the transfer matrix
+holo doctor                      # check the install, config and instruments
+holo probe switch                # talk to one instrument
+holo gui                         # launch the desktop app
+```
+
+`uv run holo <command>`, or `python -m holo` without installing. Every command
+takes `--help`. `process.py` still works as a deprecated shim for
+`holo process`.
+
+Using it as a library:
+
+```python
+from holo import HolographyDataProcessor, pipeline, discovery
+
+records, cache = discovery.stage("./data", default_wl=1550)
+rows = pipeline.process_records(HolographyDataProcessor(), records, config=cfg)
 ```
 
 See **[CLAUDE.md](CLAUDE.md)** for how the two reconstruction engines relate and

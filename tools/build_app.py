@@ -23,21 +23,19 @@ def add_data(src: str, dest: str):
 def main():
     console = "--console" in sys.argv
 
-    # Third-party deps used by the lazily-imported hardware/processing modules.
-    # PyInstaller can't see them through main.py's runtime sys.path imports, so
-    # name them explicitly.
+    # Third-party deps used by the lazily-imported driver/engine modules.
+    # `holo` and `gui` are real packages now, so --collect-all picks up their
+    # submodules; only the third-party leaves still need naming. (Before the
+    # package restructure every engine and driver had to be listed here by its
+    # bare module name, because they were reachable only via sys.path inserts.)
     hidden = [
         "yaml", "numpy", "scipy", "scipy.special", "scipy.optimize",
         "scipy.signal", "scipy.ndimage", "matplotlib", "PIL", "PIL.Image",
         "pyvisa", "pyvisa_py", "gpib_ctypes", "serial", "serial.tools.list_ports",
-        # repo-root modules main.py imports lazily
-        "fringe_detection", "data_processing", "multiport_reconstruction",
-        "pipeline",
-        # hardware drivers (also bundled as data + reachable via runtime sys.path)
-        "XenicsCam", "HPTunableLaserSource", "D700DiconSwitch", "polMotors",
-        "MMF", "calebsUsefulFunctions",
     ]
-    collect = ["PySide6", "xenics"]   # packages that ship data files / submodules / Qt plugins
+    # Packages that ship data files / lazily-imported submodules / Qt plugins.
+    # holo covers the engines, the mode math and the vendored Xeneth SDK.
+    collect = ["PySide6", "holo", "gui"]
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -47,14 +45,10 @@ def main():
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build" / "app"),
         "--specpath", str(ROOT / "build" / "app"),
-        # let PyInstaller resolve + analyze the hardware/lib/root modules so
-        # their imports get bundled, AND ship the source as data so the app's
-        # runtime sys.path inserts still find them.
         "--paths", str(ROOT),
-        "--paths", str(ROOT / "hardware"),
-        "--paths", str(ROOT / "lib"),
-        *add_data("hardware", "hardware"),
-        *add_data("lib", "lib"),
+        # Instrument calibration files are data, not code, so --collect-all
+        # does not pick them up.
+        *add_data("holo/hardware/calibration", "holo/hardware/calibration"),
         *add_data("experiment_config.yaml", "."),
         # app icon — bundled into gui/ so the window/taskbar icon resolves
         *add_data("gui/app_icon.ico", "gui"),

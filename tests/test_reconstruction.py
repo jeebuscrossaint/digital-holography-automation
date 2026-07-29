@@ -38,7 +38,7 @@ GRID            = 200       # processor's reconstruction grid size (= crop_size)
 
 @pytest.fixture(scope="module")
 def result():
-    from data_processing import HolographyDataProcessor
+    from holo.data_processing import HolographyDataProcessor
     proc = HolographyDataProcessor()
     holo = np.load(FIXTURES / "sample_hologram.npy")
     return proc.process_single_hologram(

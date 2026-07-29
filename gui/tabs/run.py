@@ -153,7 +153,7 @@ class RunTabMixin:
             meta = {"timestamp": datetime.now().isoformat(),
                     "max_value": int(arr.max()), "mean": float(arr.mean())}
             try:
-                from fringe_detection import (calculate_sideband_energy, check_saturation)
+                from holo.fringe_detection import (calculate_sideband_energy, check_saturation)
                 meta["sideband_metric"] = float(calculate_sideband_energy(arr))
                 sat = check_saturation(arr)
                 meta["saturated"] = bool(sat["saturated"])

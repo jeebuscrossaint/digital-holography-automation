@@ -5,7 +5,7 @@ hardware or captured data is needed and they run in milliseconds."""
 
 import numpy as np
 
-from fringe_detection import (calculate_sideband_energy, check_saturation,
+from holo.fringe_detection import (calculate_sideband_energy, check_saturation,
                               calculate_sideband_balance)
 
 

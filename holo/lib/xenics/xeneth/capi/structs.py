@@ -5,7 +5,7 @@ SDK Structures
 """
 
 import ctypes
-from xenics.xeneth.capi.enums import XDeviceStates
+from holo.lib.xenics.xeneth.capi.enums import XDeviceStates
 
 
 # Name conventions are from the C API. disable pylint check

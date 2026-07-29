@@ -59,7 +59,7 @@ class ConnectionMixin:
         addr  = cfg_l.get("gpib_address", "GPIB0::24::INSTR")
         self._emit(f"Laser — trying {addr}…")
         try:
-            from HPTunableLaserSource import HPTunableLaserSource
+            from holo.hardware.HPTunableLaserSource import HPTunableLaserSource
             self.laser = HPTunableLaserSource(addr)
             # Only set the display unit so queries come back in µW. Don't touch
             # power or output state — keep whatever the laser is set to.
@@ -72,7 +72,7 @@ class ConnectionMixin:
             self._emit(f"✗ Laser — {friendly_error(e)}", "WARN")
             self._emit(f"  raw: {type(e).__name__}: {str(e).splitlines()[0][:200]}", "DEBUG")
             try:
-                from HPTunableLaserSource import _make_resource_manager
+                from holo.hardware.HPTunableLaserSource import _make_resource_manager
                 res = _make_resource_manager().list_resources()
                 if res:
                     self._emit(f"  Visible VISA resources: {', '.join(res)}", "INFO")
@@ -91,7 +91,7 @@ class ConnectionMixin:
             url = "cam://0"
         self._emit(f"Camera — trying {url}…")
         try:
-            from XenicsCam import xCam
+            from holo.hardware.XenicsCam import xCam
             exposure = cfg_c.get("exposure_time", None)
             self.camera = xCam(url=url, exposure=exposure)
             ser = int(self.camera.ser) if self.camera.ser else "?"
@@ -122,7 +122,7 @@ class ConnectionMixin:
         port  = cfg_s.get("port", "COM6")
         self._emit(f"Fiber switch — trying {port}…")
         try:
-            from D700DiconSwitch import D700DiconSwitch
+            from holo.hardware.D700DiconSwitch import D700DiconSwitch
             self.switch = D700DiconSwitch(port=port, baudrate=cfg_s.get("baudrate", 9600))
             actual_port = getattr(self.switch, "port", port)
             self._hw("switch", "connected")
@@ -171,7 +171,7 @@ class ConnectionMixin:
         serial = str(cfg_m.get("serial_number", "38394984"))
         self._emit(f"Polarization motors — SN {serial}…")
         try:
-            from polMotors import polMotors
+            from holo.hardware.polMotors import polMotors
             self.motors = polMotors(serialNumber=serial.encode())
             # Don't auto-home or auto-move — that puts paddle 3 in a state where
             # subsequent moves are ignored on this firmware.

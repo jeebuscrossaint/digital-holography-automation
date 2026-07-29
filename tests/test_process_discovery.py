@@ -23,7 +23,7 @@ def sweep(tmp_path):
 def test_discovers_every_leg_wavelength_pair(sweep):
     # Regression: discovery used to key on the leg alone, so a sweep collapsed
     # to one frame per leg — 3 of 12 here — with no error to show for it.
-    from process import discover
+    from holo.discovery import discover
     records = discover(sweep, default_wl=1550)
     assert len(records) == 12
     assert {(r["leg"], int(r["wl"])) for r in records} == {
@@ -32,7 +32,7 @@ def test_discovers_every_leg_wavelength_pair(sweep):
 
 def test_prefers_array_over_image_for_the_same_frame(tmp_path):
     from PIL import Image
-    from process import discover
+    from holo.discovery import discover
     np.save(tmp_path / "leg01-wavelength1550.npy", np.zeros((8, 8)))
     Image.fromarray(np.zeros((8, 8), np.uint16)).save(
         tmp_path / "leg01-wavelength1550.png")
@@ -43,7 +43,7 @@ def test_prefers_array_over_image_for_the_same_frame(tmp_path):
 
 
 def test_sidecar_wavelength_overrides_the_filename(tmp_path):
-    from process import discover
+    from holo.discovery import discover
     np.save(tmp_path / "leg01-wavelength1550.npy", np.zeros((8, 8)))
     (tmp_path / "leg01-wavelength1550.yaml").write_text("wavelength_nm: 1552.5\n")
     records = discover(tmp_path, default_wl=1550)
@@ -51,7 +51,7 @@ def test_sidecar_wavelength_overrides_the_filename(tmp_path):
 
 
 def test_frames_without_a_leg_number_are_enumerated(tmp_path):
-    from process import discover
+    from holo.discovery import discover
     for name in ("alpha", "beta", "gamma"):
         np.save(tmp_path / f"{name}.npy", np.zeros((8, 8)))
     records = discover(tmp_path, default_wl=1550)

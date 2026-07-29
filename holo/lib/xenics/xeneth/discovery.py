@@ -6,16 +6,16 @@ Functions related to device discovery
 
 import ctypes
 from typing import Any, Tuple, Union
-from xenics.xeneth.capi.enums import XEnumerationFlags, XPropType
-from xenics.xeneth.capi.structs import XDeviceInformation
+from holo.lib.xenics.xeneth.capi.enums import XEnumerationFlags, XPropType
+from holo.lib.xenics.xeneth.capi.structs import XDeviceInformation
 
-from xenics.xeneth.capi.util import (
+from holo.lib.xenics.xeneth.capi.util import (
     _create_property_category_buffer,
     _create_property_name_buffer,
     _create_property_string_value_buffer)
 
 
-from xenics.xeneth.capi.functions import (
+from holo.lib.xenics.xeneth.capi.functions import (
     XCD_EnumerateDevices, XCD_GetPropertyCategory,
     XCD_GetPropertyCount, XCD_GetPropertyName,
     XCD_GetPropertyRange, XCD_GetPropertyType,
@@ -23,7 +23,7 @@ from xenics.xeneth.capi.functions import (
     XCD_SetPropertyValue, XCD_SetPropertyValueL
     )
 
-from xenics.xeneth.util import handle_c_call
+from holo.lib.xenics.xeneth.util import handle_c_call
 
 
 __all__ = ['enumerate_devices', 'get_property_count', 'get_property_name', 'get_property_category',

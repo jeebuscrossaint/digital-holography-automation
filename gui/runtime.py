@@ -1,55 +1,26 @@
 # -*- coding: utf-8 -*-
-"""Environment bootstrap + session logfile.
+"""GUI runtime: environment bootstrap + session logfile.
 
-Importing this module sets up the runtime environment — frozen-build paths,
-the Xeneth DLL search path, and sys.path for the hardware/ and lib/ packages.
-It MUST be imported before any hardware driver is imported (the drivers are
-imported lazily inside GUI methods, so importing this module first — as main.py
-does — is sufficient).
+The bootstrap itself (frozen-build paths, the Xeneth DLL search path, seeding
+the editable config) now lives in ``holo.runtime`` so the CLI can do hardware
+work without importing Qt. This module runs it on import and re-exports the
+paths under their historical names, then adds the one thing that is genuinely
+GUI-only: redirecting stdout into a session logfile.
+
+Importing this MUST happen before any hardware driver is imported. main.py
+does that.
 """
 
-import os
 import sys
-from pathlib import Path
 
-# ── Frozen-build paths ───────────────────────────────────────────────────────
+from holo import runtime as _rt
 
-_FROZEN = getattr(sys, "frozen", False)
-if _FROZEN:
-    # PyInstaller one-file build: bundled code/resources live under _MEIPASS,
-    # but editable data (config, logs, holograms) must live NEXT TO the .exe.
-    SCRIPT_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    DATA_DIR = Path(sys.executable).parent
-    os.chdir(DATA_DIR)               # so "./holography_data" etc. land by the exe
-else:
-    # gui/runtime.py -> repo root is one level up from the gui package.
-    SCRIPT_DIR = Path(__file__).resolve().parent.parent
-    DATA_DIR = SCRIPT_DIR
+_rt.bootstrap()
 
-# Add Xeneth DLL to Windows DLL search path
-_XENETH_RUNTIME = r"C:\Program Files\Common Files\XenICs\Runtime"
-if os.path.exists(_XENETH_RUNTIME):
-    try:
-        os.add_dll_directory(_XENETH_RUNTIME)
-    except AttributeError:
-        pass  # Python < 3.8
-    os.environ["PATH"] = _XENETH_RUNTIME + os.pathsep + os.environ.get("PATH", "")
-
-# Hardware driver paths (hardware/) and processing libs (lib/)
-for _p in (str(SCRIPT_DIR / "hardware"), str(SCRIPT_DIR / "lib")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-CONFIG_FILE = str(DATA_DIR / "experiment_config.yaml")
-# On a frozen build's first run, seed the editable config from the bundled default.
-if _FROZEN and not os.path.exists(CONFIG_FILE):
-    import shutil
-    _default_cfg = SCRIPT_DIR / "experiment_config.yaml"
-    if _default_cfg.exists():
-        try:
-            shutil.copy(str(_default_cfg), CONFIG_FILE)
-        except Exception:
-            pass
+# Re-exported for the GUI modules that already import these names.
+SCRIPT_DIR = _rt.SCRIPT_DIR
+DATA_DIR = _rt.DATA_DIR
+CONFIG_FILE = str(_rt.CONFIG_FILE)
 
 # ── Session logfile ────────────────────────────────────────────────────────────
 # Everything goes here: the GUI Activity messages (via HolographyApp._log) AND

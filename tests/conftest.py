@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Pytest setup — put the repo root and lib/ on sys.path so the tests can
-import the pipeline modules (data_processing, fringe_detection) and Caleb's
-lib helpers the same way the app does at runtime."""
+"""Pytest setup.
+
+Only the repo root goes on sys.path, so ``import holo`` resolves the same way
+it will once the package is installed. lib/ and hardware/ used to be appended
+too, because they were bare directories rather than packages; they are
+``holo.lib`` and ``holo.hardware`` now and need no help.
+"""
 
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-for p in (str(ROOT), str(ROOT / "lib"), str(ROOT / "hardware")):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
