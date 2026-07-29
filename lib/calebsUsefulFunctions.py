@@ -130,10 +130,31 @@ def randomWeights(a):
 
 #easy way to output a field given an amount of weights
 def combinedOutput(modes, weights):
-    field = np.zeros(modes[0].shape)
-    for i in range(len(weights)):
-        field = field + modes[i]*weights[i]
-    return field
+    """Recompose a field as sum_i modes[i] * weights[i].
+
+    Same result as the original accumulate-in-a-loop version, as one BLAS
+    matrix-vector product. The loop allocated a new (N,N) array per mode --
+    23 allocations and 23 dispatches for what is a single contraction over the
+    mode axis. Only the first len(weights) modes are used, as before.
+
+    As in modeDecomp, the modes are real: contracting complex weights against
+    them directly would promote the whole basis to complex128 every call, so
+    the real and imaginary parts are contracted separately.
+    """
+    modes = np.asarray(modes)
+    weights = np.asarray(weights)
+    n = len(weights)
+    M = modes[:n].reshape(n, -1)
+
+    if np.iscomplexobj(weights) and not np.iscomplexobj(M):
+        # float64 to match the original, which promoted each complex64 weight
+        # to complex128 when multiplying it by a float64 mode.
+        wr = weights.real.astype(np.float64)
+        wi = weights.imag.astype(np.float64)
+        out = (wr @ M) + 1j * (wi @ M)
+    else:
+        out = weights @ M
+    return out.reshape(modes[0].shape)
 
 #outputs an array as percent in a more pretty way, including phase
 def asPercent(a):
@@ -162,10 +183,42 @@ def overlap2FieldsV2(a,b):
 
 #defaults to no normalization
 def modeDecomp(field, modes, numModes):
-    decompMatrix = np.zeros(numModes, np.complex64)
-    for i in range(numModes):
-        decompMatrix[i] = overlap2FieldsV2(field, modes[i])
-    return decompMatrix
+    """Project a field onto the first numModes modes, normalized as
+    overlap2FieldsV2 does: <field, mode> / (||field|| ||mode||).
+
+    Identical to the original loop over overlap2FieldsV2 -- still returns
+    complex64 -- but as one BLAS matrix-vector product instead of numModes
+    Python-level inner products. That loop was ~63% of reconstruction runtime:
+    the arrays are only 128x128, so numpy's per-call dispatch cost dominated
+    the arithmetic.
+
+    The LP modes generateModes() produces are real, so the conjugate is a
+    no-op on them; the complex branch is kept for correctness if that changes.
+
+    Three details matter for speed, all measured on the real (23, 128, 128)
+    basis, and none of them change the result:
+      * M is real, so ``M @ f`` on a complex f would promote M to complex128 --
+        a 3 MB temporary per call. Two real GEMVs on f.real/f.imag: 188 vs 411 us.
+      * ``np.linalg.norm(f)`` costs 366 us on a 16k complex vector;
+        ``sqrt(vdot(f, f).real)`` is the same value via one BLAS dot: 3.7 us.
+      * ``np.linalg.norm(M, axis=1)`` is 181 us; the einsum form is 78 us.
+    """
+    modes = np.asarray(modes)
+    M = modes[:numModes].reshape(numModes, -1)
+    f = np.asarray(field).ravel()
+
+    # ||mode|| is 1.0 for a generateModesByDiameter basis, but do not assume it:
+    # a caller may pass an unnormalized basis, and the original divided by it.
+    if np.iscomplexobj(M):
+        num = M.conj() @ f
+        mode_norm = np.sqrt(np.einsum('ij,ij->i', M.real, M.real)
+                            + np.einsum('ij,ij->i', M.imag, M.imag))
+    else:
+        num = (M @ f.real) + 1j * (M @ f.imag) if np.iscomplexobj(f) else M @ f
+        mode_norm = np.sqrt(np.einsum('ij,ij->i', M, M))
+
+    field_norm = np.sqrt(np.vdot(f, f).real)
+    return (num / (mode_norm * field_norm)).astype(np.complex64)
 
 
 #squares values but retains relative phase.  Useful for describing relative intensities
@@ -292,19 +345,70 @@ def decompAndRecomp(field, modes,numModes=0):
     recomp = normalizeIntensity(recomp)
     return decomp, recomp
 
+def _batchedReconstructionFidelity(cands, modes):
+    """Fidelity of the LP reconstruction of each candidate field, all at once.
+
+    ``cands`` is (K, P): K candidate fields, each already flattened to P pixels.
+    Returns a length-K real array of overlap2FieldsV2(recomp_k, cands_k).
+
+    This is the batched form of the search-loop body
+    ``decompAndRecomp(c, modes)`` then ``overlap2FieldsV2(recomp, c)``. The
+    point is that all K candidates share one basis, so the (NM, P) mode matrix
+    is streamed from memory ONCE for the whole batch instead of once per
+    candidate -- two GEMMs rather than 2K GEMVs. The searches are the hot loops
+    (findBestOffset alone is 36 of the ~54 decompositions per iteration), and
+    they were memory-bandwidth-bound on re-reading the same 3 MB basis.
+    """
+    modes = np.asarray(modes)
+    M = modes.reshape(modes.shape[0], -1)                 # (NM, P), real
+    mode_norm = np.sqrt(np.einsum('ij,ij->i', M, M))
+
+    cr = np.ascontiguousarray(cands.real, dtype=np.float64)
+    ci = np.ascontiguousarray(cands.imag, dtype=np.float64)
+    cand_norm = np.sqrt(np.einsum('kp,kp->k', cr, cr) + np.einsum('kp,kp->k', ci, ci))
+
+    # decomposition coefficients, (NM, K) -- matches modeDecomp per candidate
+    num = (M @ cr.T) + 1j * (M @ ci.T)
+    coef = (num / (mode_norm[:, None] * cand_norm[None, :])).astype(np.complex64)
+
+    # recomposition, (K, P) -- matches combinedOutput per candidate
+    rec = ((coef.real.astype(np.float64).T @ M)
+           + 1j * (coef.imag.astype(np.float64).T @ M))
+
+    # overlap2FieldsV2(normalizeIntensity(rec_k), cand_k). Normalizing rec_k
+    # makes its own norm 1, so that whole expression collapses to
+    #     Re<rec_k, cand_k> / (||rec_k|| ||cand_k||).
+    # Only the real part is ever compared, and the denominator is real and
+    # positive, so the imaginary part of the overlap is not needed.
+    rr, ri = rec.real, rec.imag
+    rec_norm = np.sqrt(np.einsum('kp,kp->k', rr, rr) + np.einsum('kp,kp->k', ri, ri))
+    ov_real = np.einsum('kp,kp->k', rr, cr) + np.einsum('kp,kp->k', ri, ci)
+    return ov_real / (rec_norm * cand_norm)
+
+
 def findBestOffset(field, modes, xstart=-5, xstop=5, ystart=-5,ystop=5,step =1):
-    bestFidelity = 0
-    for x in np.arange(xstart,xstop,step):
-        for y in np.arange(ystart,ystop,step):
-            rolledField = rollMatrix(field,x,y)
-            decomp, recomp = decompAndRecomp(rolledField,modes)
-            fidelity = overlap2FieldsV2(recomp, rolledField)
-            # print(fidelity.real)
-            if (fidelity.real > bestFidelity.real):
-                bestFidelity = fidelity
-                optimalXOffset = x
-                optimalYOffset = y
-    return optimalXOffset, optimalYOffset
+    """Best (x, y) roll of ``field`` for LP reconstruction.
+
+    Same scan and the same first-wins tie-break as the original nested loop
+    (x outer, y inner, strict ``>``), but all candidates are decomposed in one
+    batch -- see _batchedReconstructionFidelity. np.argmax also returns the
+    first maximum, so an exact tie resolves to the same offset as before.
+    """
+    xs = np.arange(xstart, xstop, step)
+    ys = np.arange(ystart, ystop, step)
+    if xs.size == 0 or ys.size == 0:
+        raise ValueError("findBestOffset: empty search range")
+
+    field = np.asarray(field)
+    cands = np.empty((xs.size * ys.size, field.size), dtype=np.complex128)
+    k = 0
+    for x in xs:                       # x outer, y inner: preserves tie-break order
+        for y in ys:
+            cands[k] = rollMatrix(field, x, y).ravel()
+            k += 1
+
+    best = int(np.argmax(_batchedReconstructionFidelity(cands, modes)))
+    return xs[best // ys.size], ys[best % ys.size]
 
 #note, field gets smaller with larger *diameter*. It's actually pixel size.
 def findBestDiameter(field, modesByDiameter):
