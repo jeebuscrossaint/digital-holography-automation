@@ -424,16 +424,23 @@ def findBestDiameter(field, modesByDiameter):
 
 #note, field gets smaller with larger *diameter*. It's actually pixel size.
 def findBestPhase(field, modes, start = -1, stop = 1, step = .1):
-    bestFidelity = 0
-    for phase in np.arange(start,stop,step):
-        phasedField = applyQuadraticPhase(field, phase)
-        decomp, recomp = decompAndRecomp(phasedField, modes)
-        fidelity = overlap2FieldsV2(recomp, phasedField)
-        # print(fidelity.real)
-        if (fidelity.real > bestFidelity.real):
-            bestFidelity = fidelity
-            optimalPhase = phase
-    return optimalPhase
+    """Best quadratic-phase (defocus) factor for LP reconstruction.
+
+    Same scan and first-wins tie-break as the original loop; the candidates all
+    share one basis, so they are decomposed in one batch. Building the phased
+    candidates still costs one generatePhaseMask each -- that is the candidate
+    itself, not overhead.
+    """
+    phases = np.arange(start, stop, step)
+    if phases.size == 0:
+        raise ValueError("findBestPhase: empty search range")
+
+    field = np.asarray(field)
+    cands = np.empty((phases.size, field.size), dtype=np.complex128)
+    for k, phase in enumerate(phases):
+        cands[k] = applyQuadraticPhase(field, phase).ravel()
+
+    return phases[int(np.argmax(_batchedReconstructionFidelity(cands, modes)))]
 
 def adjustField(field, phase, xOffset,yOffset):
     adjustedField = applyQuadraticPhase(field, phase)
