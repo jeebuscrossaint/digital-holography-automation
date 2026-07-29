@@ -59,9 +59,11 @@ processing:
   core_radius: 1.7e-05
   numerical_aperture: 0.11
   effective_index: 1.453
-  num_modes: 18         # cap only, and it does NOT bind: core_radius/NA above
-                        # yield 15 modes, so the basis is 15. Raising this to 23
-                        # changes nothing; only core_radius/NA change the count.
+  num_modes: 18         # cap only, and it never binds over this sweep. The basis
+                        # size is set by core_radius/NA *and wavelength* (V goes
+                        # as 1/lambda): 17 modes at 1525-1545 nm, 15 at 1550-1575,
+                        # so the count is 15-17 and the cap is never reached.
+                        # Raising this changes nothing; only core_radius/NA do.
 
   # --- multiport / cross-port LP basis (multiport_reconstruction.py) ---
   multiport:

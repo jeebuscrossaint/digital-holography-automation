@@ -51,7 +51,9 @@ contain multi-GB `.spydata`/`.pkl` binaries and filenames with spaces — never
 ## Two open physics questions
 
 **1. Mode count is probably wrong.** Single-frame uses core 1.7e-5 / NA 0.11 =
-**15 modes**; multiport uses 1.2e-5 / 0.11 = **8**. Same lantern. An N-port
+**15 modes** at 1550 nm (17 below 1550 — V goes as 1/lambda, so the basis size
+changes across the sweep); multiport uses 1.2e-5 / 0.11 = **8**. Same lantern.
+An N-port
 lantern has ~N modes, so a 7-port rig means 8 and the extra 7 just absorb noise
 and inflate fidelity (measured: 15 modes 0.9717, 8 modes 0.9497 on the same
 frame). Needs the bench answer, then update `GOLDEN_FIDELITY` in the same commit.
