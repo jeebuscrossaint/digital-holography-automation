@@ -94,6 +94,7 @@ docs/                       setup guides (GigE camera, Xeneth SDK)
 ## Command line
 
 ```sh
+holo acquire -o ./run            # sweep 1530-1560 nm, 3 exposures per point
 holo process ./data              # reconstruct a folder of holograms
 holo tm ./data -o tm.npz         # reconstruct + export the transfer matrix
 holo doctor                      # check the install, config and instruments
@@ -104,6 +105,29 @@ holo gui                         # launch the desktop app
 `uv run holo <command>`, or `python -m holo` without installing. Every command
 takes `--help`. `process.py` still works as a deprecated shim for
 `holo process`.
+
+### Acquiring a sweep by hand
+
+`holo acquire` drives only the laser and the camera — you connect the lantern
+leg and set the paddles yourself, which is the usual way to take a single-leg
+test. Everything is a flag; no config file to edit.
+
+```sh
+holo acquire --start 1530 --stop 1560 --step 1 -n 3 --leg 1 -o ./run
+holo acquire --start 1530 --stop 1560 -n 3 --dry-run   # print the plan, no hardware
+```
+
+`-n 3` takes three exposures back to back at each wavelength and writes them to
+`run/rep01`, `run/rep02`, `run/rep03`. They are separate folders on purpose:
+frame discovery keeps one file per (leg, wavelength), so repeats sharing a
+folder would leave all but one silently unprocessed. Each `repNN` is a complete
+sweep — reconstruct one with `holo process ./run/rep01`.
+
+Every frame gets a `.png` preview and a `.yaml` sidecar recording the commanded
+*and* measured wavelength (the HP 8168E queues errors instead of raising, so a
+rejected tune otherwise looks like a good frame at the wrong λ). Saturated
+frames are flagged and the command exits non-zero — clipping makes intensity
+nonlinear in the field, so both amplitude and phase are wrong.
 
 Using it as a library:
 

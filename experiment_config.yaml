@@ -27,6 +27,9 @@ experiment:
     start: 1525
     stop: 1530
     step: 1
+  repeats: 1            # exposures per wavelength, taken back to back. >1 puts
+                        # each into its own repNN/ subfolder — one frame per
+                        # (leg, lambda) per folder, which is all discovery keeps.
   wait_times:
     after_leg_switch: 1.0
     after_wavelength_change: 0.5

@@ -5,6 +5,7 @@ A sibling of the GUI, not a layer under it: both call the same library and
 neither owns analysis code. Every subcommand here should be a thin argument
 parser plus a call into ``holo.*``.
 
+    holo acquire -o ./run            sweep the laser, save frames
     holo process ./data              reconstruct a folder of holograms
     holo tm ./data -o tm.npz         reconstruct + export the transfer matrix
     holo doctor                      check the install and the rig
@@ -37,6 +38,125 @@ def _rule(text):
 def _load_config(path):
     from . import config as cfgmod
     return cfgmod.load(path)
+
+
+# ── holo acquire ─────────────────────────────────────────────────────────────
+
+def cmd_acquire(args):
+    """Sweep the laser over a wavelength range and save N exposures at each.
+
+    Manual bench mode: you connect the lantern leg and set the paddles by hand,
+    this only drives the laser and the camera. No fiber switch, no motors — so
+    it runs on a rig where those aren't hooked up at all.
+    """
+    from . import acquisition, runtime
+
+    if args.step <= 0:
+        print("--step must be positive", file=sys.stderr)
+        return 2
+
+    # Inclusive of the endpoint, with a tolerance so 1530->1560 step 1 doesn't
+    # drop 1560 to float error. Rounded to 4 dp: the 8168E tunes in pm.
+    n = int(round(abs(args.stop - args.start) / args.step))
+    sign = 1 if args.stop >= args.start else -1
+    wls = [round(args.start + sign * i * args.step, 4) for i in range(n + 1)]
+
+    out = Path(args.output)
+    if args.dry_run:
+        files = acquisition.plan(wls, out, leg=args.leg, repeats=args.repeats)
+        _rule(f"DRY RUN — {len(wls)} wavelengths x {args.repeats} exposures "
+              f"= {len(files)} frames, no hardware touched")
+        print(f"wavelengths  {wls[0]} … {wls[-1]} nm  ({len(wls)} points, "
+              f"{args.step} nm step)")
+        print(f"leg          {args.leg}")
+        print(f"output       {out}")
+        for f in files[:6]:
+            print(f"  {f}")
+        if len(files) > 6:
+            print(f"  … {len(files) - 6} more")
+        return 0
+
+    runtime.bootstrap()
+    # Every setting here has a flag, so a missing config is not an error —
+    # `holo acquire` must work on a bare checkout with nothing to edit first.
+    try:
+        config = _load_config(args.config)
+    except FileNotFoundError:
+        if args.config:
+            raise
+        config = {}
+    hw = (config.get("hardware") or {})
+    cam_cfg = hw.get("camera") or {}
+    las_cfg = hw.get("laser") or {}
+
+    from .hardware.XenicsCam import xCam
+    url = args.camera or cam_cfg.get("url") or "cam://0"
+    exposure = args.exposure if args.exposure is not None \
+        else cam_cfg.get("exposure_time")
+    print(f"camera  {url}")
+    camera = xCam(url=url, exposure=exposure)
+    for line in getattr(camera, "init_log", []):
+        print(f"  {line}")
+
+    laser = None
+    if not args.no_laser:
+        from .hardware.HPTunableLaserSource import HPTunableLaserSource
+        addr = args.gpib or las_cfg.get("gpib_address", "GPIB0::24::INSTR")
+        print(f"laser   {addr}")
+        try:
+            laser = HPTunableLaserSource(addr)
+            print(f"  {laser.identify()}")
+            laser.changePowerUnit(las_cfg.get("power_unit", "UW"))
+        except Exception as e:
+            print(f"  laser connect FAILED: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+            print("  Without the laser every frame lands at the current "
+                  "wavelength. Aborting; pass --no-laser to do that on "
+                  "purpose.", file=sys.stderr)
+            camera.closeCamera()
+            return 2
+
+    val = ((config.get("experiment") or {}).get("validation") or {})
+    fmt = ((config.get("data") or {}).get("filename_format")
+           or acquisition.DEFAULT_FMT)
+
+    try:
+        _rule(f"acquire  {wls[0]}–{wls[-1]} nm, {args.step} nm step, "
+              f"{args.repeats}x per λ, leg {args.leg}")
+        rows = acquisition.sweep(
+            camera, laser, wls, out,
+            leg=args.leg, repeats=args.repeats, fmt=fmt,
+            dwell=args.dwell, settle=args.settle,
+            sat_level=float(val.get("saturation_level", 65535)),
+            sat_frac_max=float(val.get("max_saturated_fraction", 0.001)),
+            fringe_method=args.fringe)
+    finally:
+        try:
+            camera.closeCamera()
+        except Exception:
+            pass
+        if laser is not None and args.laser_off:
+            try:
+                laser.outputState(False)
+            except Exception:
+                pass
+        if laser is not None:
+            try:
+                laser.closeConnection()
+            except Exception:
+                pass
+
+    if not rows:
+        print("no frames saved", file=sys.stderr)
+        return 1
+    bad = sum(1 for r in rows if r["saturated"])
+    if bad:
+        print(f"*** {bad}/{len(rows)} frames SATURATED — those are invalid "
+              f"physics, not just noisy. Lower the exposure or laser power "
+              f"and retake them.", file=sys.stderr)
+        return 1
+    print(f"\nnext: holo process {out if args.repeats == 1 else out / 'rep01'}")
+    return 0
 
 
 # ── holo process ─────────────────────────────────────────────────────────────
@@ -278,6 +398,44 @@ def build_parser():
         p.add_argument("--wavelength", type=float, default=1550,
                        help="fallback wavelength (nm) for frames without one")
         return p
+
+    p = sub.add_parser("acquire",
+                       help="sweep the laser and save frames (manual leg/paddles)")
+    p.add_argument("-o", "--output", default="./acquisition",
+                   help="output folder (default ./acquisition)")
+    p.add_argument("--start", type=float, default=1530.0,
+                   help="first wavelength, nm (default 1530)")
+    p.add_argument("--stop", type=float, default=1560.0,
+                   help="last wavelength, inclusive, nm (default 1560)")
+    p.add_argument("--step", type=float, default=1.0,
+                   help="wavelength step, nm (default 1)")
+    p.add_argument("-n", "--repeats", type=int, default=3,
+                   help="exposures per wavelength, each into out/repNN "
+                        "(default 3)")
+    p.add_argument("--leg", type=int, default=1,
+                   help="which lantern leg is plugged in — labels the files "
+                        "only; nothing switches it (default 1)")
+    p.add_argument("--exposure", type=float, default=None,
+                   help="integration time in us (default: config)")
+    p.add_argument("--dwell", type=float, default=0.5,
+                   help="seconds to settle after each wavelength change")
+    p.add_argument("--settle", type=float, default=0.0,
+                   help="extra seconds between the repeats at one wavelength")
+    p.add_argument("--fringe", default=None,
+                   choices=["variance", "michelson", "fft_peaks", "sideband",
+                            "balance"],
+                   help="report this fringe metric per frame (no paddle moves)")
+    p.add_argument("--camera", default=None, help="camera URL (default: config)")
+    p.add_argument("--gpib", default=None, help="laser VISA address (default: config)")
+    p.add_argument("--no-laser", action="store_true",
+                   help="don't touch the laser; every frame at the current λ")
+    p.add_argument("--laser-off", action="store_true",
+                   help="switch the laser output off when the sweep ends")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the wavelengths and filenames, touch no hardware")
+    p.add_argument("--config", default=None,
+                   help="config file (default: experiment_config.yaml)")
+    p.set_defaults(func=cmd_acquire)
 
     p = common(sub.add_parser("process", help="reconstruct a folder of holograms"))
     p.add_argument("folders", nargs="+", help="folder(s) of holograms")

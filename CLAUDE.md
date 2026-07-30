@@ -31,7 +31,17 @@ gui/           PySide6 app     main.py   GUI launcher
 ```
 holo process ./data      reconstruct a folder      holo doctor   check install
 holo tm ./data -o tm.npz transfer matrix -> .npz   holo probe switch
+holo acquire -o ./run    sweep lambda + save frames (all flags, no config edit)
 ```
+
+`holo acquire` is the manual-bench path: it drives only the laser and camera, so
+the leg and the paddles stay in the operator's hands. `-n 3` takes 3 exposures
+per wavelength into `rep01/`..`rep03/` — separate folders because
+`discovery.discover` keeps one frame per (leg, lambda), so repeats sharing a
+folder would leave all but one silently unprocessed. `--dry-run` prints the
+wavelengths and filenames without touching hardware. The acquisition loop itself
+lives in `holo/acquisition.py`; the GUI's Start button calls the same code
+(`experiment.repeats` in the config).
 
 `uv run holo <cmd>`, or `python -m holo`. `process.py` is a deprecated shim for
 `holo process`.

@@ -1,72 +1,19 @@
 # -*- coding: utf-8 -*-
 """The experiment run: collection (sweep legs × wavelengths, optimize
 polarization, validate saturation, save) and processing (reconstruct each
-hologram). This is the single source-of-truth acquisition loop for the app."""
+hologram). The loop lives here; the frame-level work (naming, saving,
+saturation, sidecars) is ``holo.acquisition``, shared with ``holo acquire``."""
 
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
 
+from holo.acquisition import (format_capture_name, read_paddle_angles,  # noqa: F401
+                             repeat_dir, save_capture, save_preview_png)
+
 from .runtime import CONFIG_FILE
-
-
-def format_capture_name(fmt: str, leg, wl) -> str:
-    """Build a save filename that tolerates fractional wavelengths.
-
-    Whole-number wavelengths use the configured format verbatim (e.g.
-    ``leg01-wavelength1525.npy`` — unchanged/backward compatible). A fractional
-    wavelength would crash the default ``{wavelength:04d}`` integer code, so we
-    fall back to a dot-free tag (``leg01-wavelength1525p1.npy``) — the 'p' keeps
-    the file extension clean. The true wavelength is always stored in the .yaml
-    metadata, so the filename is just a label."""
-    leg = int(leg)
-    try:
-        return fmt.format(leg=leg,
-                          wavelength=int(wl) if float(wl).is_integer() else wl)
-    except (ValueError, KeyError):
-        import re
-        safe = re.sub(r"\{wavelength[^}]*\}", "{wavelength}", fmt)
-        tag = f"{float(wl):.4f}".rstrip("0").rstrip(".").replace(".", "p")
-        return safe.format(leg=leg, wavelength=tag)
-
-
-def read_paddle_angles(motors):
-    """Actual paddle positions read from the hardware. Deliberately not
-    motors.angles — that is the last *commanded* angle, which is stale
-    ([0,0,0]) if the app hasn't moved the paddles this session, and it would
-    be recorded into the capture metadata as if it were measured."""
-    if motors is None:
-        return [0.0, 0.0, 0.0]
-    out = []
-    for i in (1, 2, 3):
-        try:
-            out.append(round(float(motors.getPosition(i)), 2))
-        except Exception:
-            try:
-                out.append(round(float(motors.angles[i - 1]), 2))
-            except Exception:
-                out.append(0.0)
-    return out
-
-
-def save_preview_png(frame, path):
-    """Save a viewable 8-bit PNG of a raw frame (mean ± 3σ contrast stretch)."""
-    try:
-        import numpy as np
-        from PIL import Image
-        a = np.asarray(frame).astype(np.float32)
-        mu, sd = float(a.mean()), float(a.std())
-        if sd < 1e-6:
-            disp = np.full(a.shape, 128, np.uint8)
-        else:
-            lo, hi = mu - 3 * sd, mu + 3 * sd
-            disp = np.clip((a - lo) / max(hi - lo, 1e-6) * 255, 0, 255).astype(np.uint8)
-        Image.fromarray(disp, "L").save(str(path))
-    except Exception:
-        pass
 
 
 class ExperimentMixin:
@@ -116,11 +63,8 @@ class ExperimentMixin:
 
     # ── Collection ────────────────────────────────────────────────────────────
     def _run_collection(self, cb):
-        import numpy as np
-        import yaml
         from holo.fringe_detection import (check_fringes_visible,
-                                       optimize_polarization_for_fringes,
-                                       check_saturation)
+                                       optimize_polarization_for_fringes)
 
         cfg    = self.config
         val    = cfg.get("experiment", {}).get("validation", {})
@@ -128,6 +72,10 @@ class ExperimentMixin:
         sat_frac_max = float(val.get("max_saturated_fraction", 0.001))
         legs   = cfg["experiment"]["legs"]
         wls    = cfg["experiment"]["wavelengths"]
+        # Exposures per wavelength. >1 writes each into its own out/repNN folder
+        # — see holo.acquisition: discovery keeps one frame per (leg, λ), so
+        # repeats sharing a folder would leave all but one unprocessed.
+        repeats = max(1, int(cfg["experiment"].get("repeats", 1) or 1))
         waits  = cfg["experiment"]["wait_times"]
         fdet   = cfg["experiment"]["fringe_detection"]
         pol_cfg    = cfg["experiment"].get("polarization", {})
@@ -170,9 +118,15 @@ class ExperimentMixin:
                     "text": f"⚠ Couldn't enable laser output: {e} — check the laser",
                     "level": "WARN"})
 
+        rep_note = f" × {repeats} exposures" if repeats > 1 else ""
         cb({"type": "log",
-            "text": f"Collection: {len(legs)} legs × {len(wls)} wavelengths = {total} images",
+            "text": (f"Collection: {len(legs)} legs × {len(wls)} wavelengths"
+                     f"{rep_note} = {total * repeats} images"),
             "level": "INFO"})
+        if repeats > 1:
+            cb({"type": "log",
+                "text": f"  {repeats} exposures per λ → subfolders rep01…rep{repeats:02d}",
+                "level": "INFO"})
 
         for li, leg in enumerate(legs):
             if self.stop_event.is_set():
@@ -243,42 +197,47 @@ class ExperimentMixin:
                     cb({"type": "log",
                         "text": "  ✗ Frame capture failed — skipping", "level": "WARN"})
 
-                if frame is not None:
+                # Save `repeats` exposures at this wavelength, back to back.
+                # The frame already in hand is rep 1; the rest are grabbed now,
+                # with nothing else touched between them, so they measure this
+                # rig's repeatability at a fixed λ.
+                for rep in range(1, repeats + 1):
+                    if frame is None or self.stop_event.is_set():
+                        break
+
                     # Saturation/clipping check — a clipped fringe is no longer
                     # a clean sinusoid, so its FFT sideband (and the recovered
                     # amplitude/phase) are corrupted. Flag it; still save so the
                     # raw data isn't lost, but mark it invalid in metadata.
-                    sat = check_saturation(frame, sat_level=sat_level,
-                                           sat_fraction_max=sat_frac_max)
-                    if sat["saturated"]:
+                    rec = save_capture(
+                        frame, repeat_dir(out, rep, repeats), leg, wl, fmt=fmt,
+                        motors=self.motors, sat_level=sat_level,
+                        sat_frac_max=sat_frac_max,
+                        metadata=bool(cfg["data"]["save_metadata"]),
+                        extra={"repeat": rep, "repeats": repeats})
+
+                    if rec["saturated"]:
                         cb({"type": "log",
-                            "text": (f"  ⚠ SATURATED — {sat['fraction']*100:.2f}% "
-                                     f"of pixels clipped (max {sat['max_value']}/"
+                            "text": (f"  ⚠ SATURATED — {rec['saturated_fraction']*100:.2f}% "
+                                     f"of pixels clipped (max {rec['max_value']}/"
                                      f"{int(sat_level)}). Data INVALID — reduce "
                                      f"exposure or laser power."),
                             "level": "WARN"})
 
-                    fname = format_capture_name(fmt, leg, wl)
-                    fpath = out / fname
-                    np.save(fpath, frame)
-                    save_preview_png(frame, fpath.with_suffix(".png"))   # viewable pic
+                    tag = "WARN" if rec["saturated"] else "OK"
+                    flag = "  ⚠ invalid(saturated)" if rec["saturated"] else ""
+                    shown = (rec["path"].name if repeats == 1
+                             else f"{rec['path'].parent.name}/{rec['path'].name}")
+                    cb({"type": "log", "text": f"  💾 {shown}{flag}", "level": tag})
 
-                    if cfg["data"]["save_metadata"]:
-                        angles = read_paddle_angles(self.motors)   # actual positions
-                        meta = {"leg": leg, "wavelength_nm": wl,
-                                "timestamp": datetime.now().isoformat(),
-                                "polarizer_angles_deg": angles,
-                                "motor_angles": angles,            # back-compat key
-                                "saturated": bool(sat["saturated"]),
-                                "saturated_fraction": float(sat["fraction"]),
-                                "max_value": int(sat["max_value"]),
-                                "fill_fraction": float(sat["fill_fraction"])}
-                        with open(fpath.with_suffix(".yaml"), "w") as f:
-                            yaml.dump(meta, f)
-
-                    tag = "WARN" if sat["saturated"] else "OK"
-                    flag = "  ⚠ invalid(saturated)" if sat["saturated"] else ""
-                    cb({"type": "log", "text": f"  💾 {fname}{flag}", "level": tag})
+                    if rep < repeats:
+                        frame = self.camera.getFrame()
+                        if frame is None:
+                            cb({"type": "log",
+                                "text": f"  ✗ Exposure {rep + 1}/{repeats} failed — skipping",
+                                "level": "WARN"})
+                            break
+                        cb({"type": "frame", "data": frame})
 
                 cb({"type": "progress",
                     "percent": n / total * 100,
