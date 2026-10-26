@@ -66,20 +66,27 @@ def GET_LP_mode(X, Y, order, u, w, coreRadius):
     cosTerm = np.cos(order * angle)
     sinTerm = np.sin(order * angle)
 
-    # Compute core and cladding functions
-    coreBessel = jv(order, (u / coreRadius) * rad) / jv(order, u)
-    claddingBessel = kv(order, (w / coreRadius) * rad) / kv(order, w)
-
     # Define core and cladding regions
     inCore = rad <= coreRadius
     inCladding = rad > coreRadius
 
-    # Compute mode profiles
-    modeCos[inCore] = coreBessel[inCore] * cosTerm[inCore]
-    modeSin[inCore] = coreBessel[inCore] * sinTerm[inCore]
+    # Compute core and cladding functions. The Bessel calls are ~80% of mode
+    # generation, so evaluate each only where it is used (jv in the core, kv in
+    # the cladding) and only once per distinct radius (the square grid repeats
+    # radii ~8x). Same inputs to the same functions: results are bit-identical.
+    def radial(fn, arg_scale, norm, region):
+        r_unique, inverse = np.unique(rad[region], return_inverse=True)
+        return (fn(order, arg_scale * r_unique) / norm)[inverse]
 
-    modeCos[inCladding] = claddingBessel[inCladding] * cosTerm[inCladding]
-    modeSin[inCladding] = claddingBessel[inCladding] * sinTerm[inCladding]
+    coreBessel = radial(jv, u / coreRadius, jv(order, u), inCore)
+    claddingBessel = radial(kv, w / coreRadius, kv(order, w), inCladding)
+
+    # Compute mode profiles
+    modeCos[inCore] = coreBessel * cosTerm[inCore]
+    modeSin[inCore] = coreBessel * sinTerm[inCore]
+
+    modeCos[inCladding] = claddingBessel * cosTerm[inCladding]
+    modeSin[inCladding] = claddingBessel * sinTerm[inCladding]
 
     # Normalize to total energy of 1
     normCos = np.sqrt(np.sum(modeCos**2) * dx * dy)
