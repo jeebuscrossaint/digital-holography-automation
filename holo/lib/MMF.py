@@ -4,8 +4,10 @@ Created on Mon Mar 10 14:51:18 2025
 
 @author: Miguel Bandres
 """
-import numpy as np
+import functools
 import math
+
+import numpy as np
 from scipy.special import jv, kv  # Bessel functions
 from scipy.optimize import fsolve
 import warnings
@@ -101,6 +103,72 @@ def GET_LP_mode(X, Y, order, u, w, coreRadius):
 
     return modeCos, modeSin
 
+# The LP eigenvalues depend only on the fiber and the wavelength, not on the
+# grid a basis is sampled on, but modes2 is called once per FOV candidate (11 per
+# frame). Solving once per wavelength cuts mode generation by ~half; the solve
+# is unchanged, so the bases are bit-identical.
+@functools.lru_cache(maxsize=256)
+def _lp_solutions(coreRadius, numAperture, wavelength, nCore):
+    k = 2*np.pi/wavelength
+    nCladding = np.sqrt(nCore**2 - numAperture**2)
+    V = coreRadius*numAperture*(2*np.pi/(wavelength))     
+
+    nu = 5000
+    u = np.linspace(0, V - 0.001, nu)
+    
+    coreTerm = np.zeros(nu)
+    claddingTerm = np.zeros(nu)
+    signChange = np.zeros(nu)
+
+
+    # Initialize variables
+    order = 0
+    LP = []  # List to store mode solutions
+    
+    while True:
+        #print('Order:', order)
+        # Beta value
+        beta = np.sqrt(k**2 * nCore**2 - (u / coreRadius) ** 2)
+    
+        # w value (cladding)
+        w = coreRadius * np.sqrt(beta**2 - k**2 * nCladding**2)
+    
+        # Core function
+        coreTerm = jv(order, u) / (u * jv(order - 1, u))
+    
+        # Cladding function
+        claddingTerm = kv(order, w) / (w * kv(order - 1, w))
+    
+        # Compute result
+        Res = coreTerm + claddingTerm
+    
+        # Detect sign changes
+        signChange = (np.sign(Res[1:]) != np.sign(Res[:-1])) * (Res[1:] > Res[:-1])
+        coarseSolutions = np.where(signChange)[0] + 1
+    
+        # Find exact solutions using root-finding
+        for iSolution in range(len(coarseSolutions)):
+            minRange = u[coarseSolutions[iSolution] - 1]
+            maxRange = u[coarseSolutions[iSolution]]
+    
+            # Find the exact root
+            u_solution = fsolve(LP_mismatch, [minRange, maxRange], (coreRadius, nCore, nCladding, wavelength, order))[0]
+
+            LP.append({
+                'u': u_solution,
+                'l': order,
+                'beta': np.sqrt(k**2 * nCore**2 - (u_solution / coreRadius)**2),
+                'w': np.sqrt(V**2 - u_solution**2),
+                'm': iSolution
+            })   
+    
+        if len(coarseSolutions) == 0:
+            break  # Stop if no solutions found
+    
+        # Move to the next order
+        order += 1
+    return V, tuple(LP)
+
 # %% CLASSES
 
 class MMF():
@@ -160,65 +228,9 @@ class MMF():
     # "exact" solutions from Dr. Bandres
     def modes2(self, wavelength: float, nCore=1.453, figNum=0) -> list[np.ndarray]:
         flag_Order = True
-        k = 2*np.pi/wavelength
-        nCladding = np.sqrt(nCore**2 - self.NA**2)
-        V = self.r_core*self.NA*(2*np.pi/(wavelength))     
+        V, LP = _lp_solutions(self.r_core, self.NA, wavelength, nCore)
+        LP = list(LP)
 
-        nu = 5000
-        u = np.linspace(0, V - 0.001, nu)
-        
-        coreTerm = np.zeros(nu)
-        claddingTerm = np.zeros(nu)
-        signChange = np.zeros(nu)
-
-
-        # Initialize variables
-        order = 0
-        LP = []  # List to store mode solutions
-        
-        while True:
-            #print('Order:', order)
-            # Beta value
-            beta = np.sqrt(k**2 * nCore**2 - (u / self.r_core) ** 2)
-        
-            # w value (cladding)
-            w = self.r_core * np.sqrt(beta**2 - k**2 * nCladding**2)
-        
-            # Core function
-            coreTerm = jv(order, u) / (u * jv(order - 1, u))
-        
-            # Cladding function
-            claddingTerm = kv(order, w) / (w * kv(order - 1, w))
-        
-            # Compute result
-            Res = coreTerm + claddingTerm
-        
-            # Detect sign changes
-            signChange = (np.sign(Res[1:]) != np.sign(Res[:-1])) * (Res[1:] > Res[:-1])
-            coarseSolutions = np.where(signChange)[0] + 1
-        
-            # Find exact solutions using root-finding
-            for iSolution in range(len(coarseSolutions)):
-                minRange = u[coarseSolutions[iSolution] - 1]
-                maxRange = u[coarseSolutions[iSolution]]
-        
-                # Find the exact root
-                u_solution = fsolve(LP_mismatch, [minRange, maxRange], (self.r_core, nCore, nCladding, wavelength, order))[0]
-
-                LP.append({
-                    'u': u_solution,
-                    'l': order,
-                    'beta': np.sqrt(k**2 * nCore**2 - (u_solution / self.r_core)**2),
-                    'w': np.sqrt(V**2 - u_solution**2),
-                    'm': iSolution
-                })   
-        
-            if len(coarseSolutions) == 0:
-                break  # Stop if no solutions found
-        
-            # Move to the next order
-            order += 1
-        
         # Remove the first empty entry if necessary
         # if len(LP) > 0:
         #     LP.pop(0)
