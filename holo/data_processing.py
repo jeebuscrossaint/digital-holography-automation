@@ -286,32 +286,44 @@ class HolographyDataProcessor:
                      for lp in self._lp_cuts]
         bases = [normalizeIntensity(self._center_on_beam(ES_full, grid))
                  for ES_full, _, _ in recovered]
-        mode_sets = [self._modes_at(fov, wl_m) for fov in self._fovs]
-        keep = _screen_candidates(
-            bases, mode_sets, self._num_modes,
-            [phase_masks[float(pf)] for pf in self._phases])
+        def search(fovs, best=None):
+            mode_sets = [self._modes_at(fov, wl_m) for fov in fovs]
+            keep = _screen_candidates(
+                bases, mode_sets, self._num_modes,
+                [phase_masks[float(pf)] for pf in self._phases])
 
-        # Exact search, unchanged, over only the combinations the screen kept.
-        best = None
-        for li, lp in enumerate(self._lp_cuts):
-            ES_full, centroid, sel = recovered[li]
-            base = bases[li]
-            for fi, fov in enumerate(self._fovs):
-                modes = mode_sets[fi]
-                nm = min(self._num_modes, modes.shape[0])
-                for pi, pf in enumerate(self._phases):
-                    if not keep[li, fi, pi]:
-                        continue
-                    fld = normalizeIntensity(base * phase_masks[float(pf)])
-                    dec = modeDecomp(fld, modes, nm)
-                    rec = combinedOutput(modes[:nm], dec)
-                    fid = abs(overlap2FieldsV2(fld, rec)) ** 2     # paper's eta (Eq 5)
-                    if best is None or fid > best['fidelity']:
-                        best = dict(fidelity=fid, lp=lp, fov=fov, phase=float(pf),
-                                    nm=nm, field=fld, recomp=normalizeIntensity(rec),
-                                    decomp=dec, recovered_full=ES_full,
-                                    recovered_centered=base, selection=sel,
-                                    centroid=centroid, modes=modes)
+            # Exact search, unchanged, over only the combinations the screen kept.
+            for li, lp in enumerate(self._lp_cuts):
+                ES_full, centroid, sel = recovered[li]
+                base = bases[li]
+                for fi, fov in enumerate(fovs):
+                    modes = mode_sets[fi]
+                    nm = min(self._num_modes, modes.shape[0])
+                    for pi, pf in enumerate(self._phases):
+                        if not keep[li, fi, pi]:
+                            continue
+                        fld = normalizeIntensity(base * phase_masks[float(pf)])
+                        dec = modeDecomp(fld, modes, nm)
+                        rec = combinedOutput(modes[:nm], dec)
+                        fid = abs(overlap2FieldsV2(fld, rec)) ** 2     # paper's eta (Eq 5)
+                        if best is None or fid > best['fidelity']:
+                            best = dict(fidelity=fid, lp=lp, fov=fov, phase=float(pf),
+                                        nm=nm, field=fld, recomp=normalizeIntensity(rec),
+                                        decomp=dec, recovered_full=ES_full,
+                                        recovered_centered=base, selection=sel,
+                                        centroid=centroid, modes=modes)
+            return best
+
+        # Coarse FOV grid, then a 2-um refinement around the winner. The 10-um
+        # grid alone straddles the optimum: on the Jun 9 sweep every frame
+        # landed on 20 um while the 2-um optimum is 22-24 um; one shared 22 um
+        # for all 51 frames gives 97.1% vs 95.0% (8 modes), so the gain is
+        # resolution of a physical scale, not per-frame freedom.
+        best = search(self._fovs)
+        f0 = best['fov']
+        fine = [round(f0 + d * 1e-6, 9) for d in (-8, -6, -4, -2, 2, 4, 6, 8)]
+        fine = [f for f in fine if f > 0 and f not in self._fovs]
+        best = search(fine, best)
 
         # Field-position refinement (paper Sec. 2): roll the winning field to
         # best-fit the mode basis.

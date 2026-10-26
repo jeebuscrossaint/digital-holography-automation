@@ -13,8 +13,10 @@ import pytest
 from conftest import FIXTURES
 
 
-def _exhaustive(proc, hologram, wl_nm):
-    """The search as it was before screening: every combination, exactly."""
+def _exhaustive(proc, hologram, wl_nm, fovs=None, best=None):
+    """The search as it was before screening: every combination, exactly.
+    Called twice, like the engine: the coarse FOV grid, then the 2-um
+    refinement around its winner."""
     from holo.lib.calebsUsefulFunctions import (
         combinedOutput, generatePhaseMask, modeDecomp, normalizeIntensity,
         overlap2FieldsV2)
@@ -22,11 +24,10 @@ def _exhaustive(proc, hologram, wl_nm):
     s = min(h, w)
     H = hologram[(h - s) // 2:(h - s) // 2 + s, (w - s) // 2:(w - s) // 2 + s]
     grid = proc._grid
-    best = None
     for lp in proc._lp_cuts:
         ES_full, _, _ = proc._recover_field(H, lp)
         base = normalizeIntensity(proc._center_on_beam(ES_full, grid))
-        for fov in proc._fovs:
+        for fov in (proc._fovs if fovs is None else fovs):
             modes = proc._modes_at(fov, wl_nm * 1e-9)
             nm = min(proc._num_modes, modes.shape[0])
             for pf in proc._phases:
@@ -47,6 +48,9 @@ def test_screened_search_matches_exhaustive(core_radius):
     with contextlib.redirect_stdout(io.StringIO()):
         res = proc.process_single_hologram(holo, wavelength_nm=1550)
         want = _exhaustive(proc, holo, 1550)
+        fine = [round(want[2] + d * 1e-6, 9) for d in (-8, -6, -4, -2, 2, 4, 6, 8)]
+        want = _exhaustive(proc, holo, 1550,
+                           [f for f in fine if f > 0 and f not in proc._fovs], want)
     got = res["best_params"]
     assert (got["lp"], got["fov"], got["phase"]) == want[1:]
     # Position refinement only ever replaces the search's best with a better fit.
