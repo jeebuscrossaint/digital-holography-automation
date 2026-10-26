@@ -263,7 +263,7 @@ def cmd_tm(args):
         core_radius=float(mp.get("core_radius", 12e-6)),
         NA=float(mp.get("numerical_aperture", 0.11)),
         n_eff=float(mp.get("effective_index", 1.453)),
-        diameter_range=(40, 90), pol_half=None, ref_wavelength=wls[0])
+        diameter_range=(20, 90), pol_half=None, ref_wavelength=wls[0])
 
     out = R.reconstruct_all(progress=(lambda s: print("  " + s)) if args.verbose else None)
     fid = np.asarray(out["fidelity"], dtype=float)

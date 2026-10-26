@@ -88,7 +88,9 @@ def run_multiport(data_dir, legs, wavelengths, config, log=_noop_log):
             core_radius=float(mp_cfg.get("core_radius", 12e-6)),
             NA=float(mp_cfg.get("numerical_aperture", 0.11)),
             n_eff=float(mp_cfg.get("effective_index", 1.453)),
-            diameter_range=(40, 90),
+            # FOV (um) the 64-px field spans. 40 was the floor and railed: the
+            # Aug 4 7-port sweep fits best at 28-43 um.
+            diameter_range=(20, 90),
             pol_half=None,                       # single-polarisation rig
             ref_wavelength=wavelengths[0])
         out = mp.reconstruct_all()
