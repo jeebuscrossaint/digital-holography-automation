@@ -109,4 +109,4 @@ the old notes here measured 3 wavelengths x 19 legs = **57 frames**: 96.76% +/-
 0.95%, worst 93.7%. The full 51 x 19 = **969 frames** gives 96.68% +/- 1.58%,
 worst **80.0%**, 37 frames under 95%. The mean is stable, the tail is not, and
 the 57-frame row was being quoted as if it covered the archive. A full sweep is
-~10 min (`reconstruct_all`, 0.6 s/frame) — cheap enough to just run.
+~5 min (`reconstruct_all`, 0.33 s/frame, measured 2026-10-26) — cheap enough to just run.
