@@ -201,15 +201,20 @@ class MultiPortReconstructor:
         if self._center is None:
             self.find_beam_center()
         cents = np.zeros((len(self.wavelengths), 2))
+        fcs, pas, pks = [], [], []
         for i, wl in enumerate(self.wavelengths):
             fa = np.zeros((self.crop, self.crop))
+            pa = np.zeros((self.crop, self.crop))
             for leg in self.legs:
                 c = cropArray(self._load(leg, wl).astype(float), self._center, self.crop)
                 f = filterDCComponents(np.fft.fftshift(np.fft.fft2(c)), 1, 40)
                 f = self._zero_fft_half(f)
                 fa = fa + np.abs(f)
+                pa = pa + np.abs(f) ** 2
             fc = scipy.signal.convolve2d(fa, generateMask(15, 15), mode="same")
-            pk = _argmax2d(fc)
+            fcs.append(fc); pas.append(pa); pks.append(_argmax2d(fc))
+        pks = self._pin_carrier(fcs, pas, pks)
+        for i, (fc, pk) in enumerate(zip(fcs, pks)):
             bf = makeButterworth(self.crop, pk[1], pk[0])
             cents[i] = scipy.ndimage.center_of_mass(fc * bf)
         idx = np.arange(len(self.wavelengths))
@@ -226,6 +231,40 @@ class MultiPortReconstructor:
             self._xC = cents[:, 0].copy()
             self._yC = cents[:, 1].copy()
         return self._xC, self._yC
+
+    def _pin_carrier(self, fcs, pas, pks, radius=12):
+        """Keep every wavelength on ONE sideband.
+
+        Each wavelength's argmax is trusted when they all agree (within
+        `radius` px of their median), which is the case on Caleb's archive, so
+        this returns `pks` untouched there. When they disagree, the argmax hops
+        between candidates and the line fit lands between them. The Aug 4 2026
+        7-port archive hops between its strongest sideband, that sideband's
+        twin, and a second, weaker sideband (Jun-engine-equivalent multiport
+        eta 3.4%). The second sideband is the same field read against another
+        reference beam: one leg-independent map predicts it from the first at
+        median overlap 0.886, vs 0.075 for a mismatched port. So the choice
+        is signal power, which the amplitude metric above can't see (the two
+        score within 8%; in power, the second is ~0.37 of the first). The
+        sweep-summed power picks the pair. Twins tie in power, so the twin
+        that more wavelengths chose wins. Each wavelength then takes its
+        argmax within `radius` of the chosen peak.
+        """
+        pks = [np.asarray(p) for p in pks]
+        med = np.median(pks, axis=0)
+        if all(np.hypot(*(p - med)) <= radius for p in pks):
+            return pks
+        mask = generateMask(15, 15)
+        tot = sum(scipy.signal.convolve2d(pa, mask, mode="same") for pa in pas)
+        s = np.asarray(_argmax2d(tot))
+        twin = self.crop - s                      # mirror through the fftshift centre
+        votes = sum(np.hypot(*(p - s)) <= radius for p in pks)
+        votes_twin = sum(np.hypot(*(p - twin)) <= radius for p in pks)
+        if votes_twin > votes:
+            s = twin
+        yy, xx = np.mgrid[:self.crop, :self.crop]
+        near = np.hypot(yy - s[0], xx - s[1]) <= radius
+        return [np.asarray(_argmax2d(np.where(near, fc, -np.inf))) for fc in fcs]
 
     # ── step 3: sub-pixel field extraction for one frame ────────────────────────
     def extract_field(self, leg, wl_index):
