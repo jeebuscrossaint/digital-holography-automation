@@ -27,7 +27,9 @@ from conftest import FIXTURES
 # the code actually produces and the +/-0.02 tolerance was hiding it, so the
 # "golden" number silently disagreed with both CLAUDE.md and a real run. 0.9717
 # is the measured value of the default (15-mode) config on this fixture.
-GOLDEN_FIDELITY = 0.9717
+# 0.9717 -> 0.9788 when the carrier went back to a peak-pixel pick and a local
+# centroid (the blurred, plane-wide centroid sat slightly off the peak).
+GOLDEN_FIDELITY = 0.9788
 FIDELITY_TOL    = 0.005     # absolute. Was 0.02, which was wide enough to hide a
                             # 0.0053 drift in the constant itself for weeks. The
                             # search is deterministic, so anything above FP noise

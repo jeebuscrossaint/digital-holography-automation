@@ -164,30 +164,31 @@ class HolographyDataProcessor:
         """Locate the carrier and shift the twin sideband to DC. Returns
         (shifted spectrum, (row, col) carrier centroid).
 
-        The carrier must be found by zeroing the DC cross and centre disk, then
-        disk-blurring, then taking a Butterworth-weighted sub-pixel centroid.
-        A raw argmax outside a small disk is not good enough: on a low-contrast
-        frame the residual DC skirt outshines the true sideband, so it locks
-        onto DC and demodulates around it, producing ~1% fidelity."""
+        Zero the DC cross and centre disk first: with only a small DC disk
+        masked, the residual DC skirt can outshine the sideband on a
+        low-contrast frame, and the carrier locks next to DC (~1% fidelity).
+
+        Then take the brightest single pixel and a 13x13 centre of mass around
+        it (the Jun 9 engine's recipe). Don't blur first. Some frames carry two
+        sidebands: the same field read against two reference beams, a few
+        pixels from each other's twins. A 15-px blur, or a Butterworth-
+        weighted centroid over the whole plane, mixes them. Blurred amplitude
+        or power then sometimes picks the second lobe, and the wide centroid
+        gets pulled off the peak. 8 modes, blur/power (4632cf2) -> this:
+        Jun 9, 51 frames with background, 92.0 +/- 6.2% -> 95.1 +/- 0.9%
+        (worst 61% -> 93%); Aug 4 7-port, 215 unclipped frames,
+        90.1 +/- 4.2% -> 91.8 +/- 2.2%."""
         H = hologram.astype(float)
         N = H.shape[0]
         F = np.fft.fftshift(np.fft.fft2(H))
         cy, cx = N // 2, N // 2
-        # Kill the DC cross + center disk, blur, then pick the brightest lobe
-        # (the off-axis sideband). getMaxIndex returns (row, col).
         Pdc = filterDCComponents(np.abs(F).astype(float), 1, dc_diameter)
-        blur = signal.convolve2d(Pdc, generateMask(15, 15), mode='same')
-        # Choose the lobe by POWER, not amplitude. Some frames carry two
-        # sidebands: the same field read against two reference beams (Aug 4
-        # 2026 7-port and Jun 9 sweeps). The two can tie in blurred amplitude
-        # while the stronger reference carries 1.1-20x the power. The
-        # stronger one has the better SNR, and it was the June engine's pick.
-        pky, pkx = getMaxIndex(signal.convolve2d(Pdc ** 2, generateMask(15, 15),
-                                                 mode='same'))
-        # Butterworth-weight around that lobe and take the sub-pixel centroid
-        # (makeButterworth's center is (X=col, Y=row) -> pass (pkx, pky)).
-        bw = makeButterworth(N, pkx, pky, wc=15)
-        cyy, cxx = ndimage.center_of_mass(blur * bw)
+        py, px = getMaxIndex(Pdc)                             # (row, col)
+        w = 6
+        y0, y1 = max(py - w, 0), min(py + w + 1, N)
+        x0, x1 = max(px - w, 0), min(px + w + 1, N)
+        dy, dx = ndimage.center_of_mass(Pdc[y0:y1, x0:x1])
+        cyy, cxx = y0 + dy, x0 + dx
         u0, v0 = (cxx - cx) / N, (cyy - cy) / N               # carrier freq (cyc/px)
         Y, X = np.mgrid[0:N, 0:N]
         demod = H * np.exp(-2j * np.pi * (u0 * X + v0 * Y))    # shift twin -> DC

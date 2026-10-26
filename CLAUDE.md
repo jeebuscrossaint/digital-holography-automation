@@ -87,7 +87,7 @@ contain multi-GB `.spydata`/`.pkl` binaries and filenames with spaces — never
 changes across the sweep); multiport uses 1.2e-5 / 0.11 = **8**. Same lantern.
 An N-port
 lantern has ~N modes, so a 7-port rig means 8 and the extra 7 just absorb noise
-and inflate fidelity (measured: 15 modes 0.9717, 8 modes 0.9497 on the same
+and inflate fidelity (measured: 15 modes 0.9788, 8 modes 0.9625 on the same
 frame). Needs the bench answer, then update `GOLDEN_FIDELITY` in the same commit.
 
 A third parameter set exists and is *not* a fourth opinion: the
