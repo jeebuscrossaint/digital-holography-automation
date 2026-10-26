@@ -100,12 +100,115 @@ def run_multiport(data_dir, legs, wavelengths, config, log=_noop_log):
         return {}
 
 
+# ── one frame ────────────────────────────────────────────────────────────────
+
+_RESULT_KEYS = ("fidelity", "mode_powers", "mode_decomposition",
+                "recovered_field_corrected")
+
+
+def _single_frame(proc, rec, *, load, background, ref_index, bg_modifier,
+                  save, show, log=_noop_log):
+    """Load, background-subtract and reconstruct one record.
+
+    Depends only on the record, so the serial loop and the worker pool both
+    call it and produce the same numbers."""
+    hologram = proc.load_hologram(rec["path"])
+    bg = background
+    if bg is None:
+        bg = nearest_background(ref_index, rec["wl"], load, log)
+    res = proc.process_single_hologram(
+        hologram, wavelength_nm=rec["wl"], show_plots=show, save_plots=save,
+        plot_prefix=rec["label"], background=bg, bg_modifier=bg_modifier)
+    return {k: res[k] for k in _RESULT_KEYS}
+
+
+# Per-worker state, set once by _worker_init so the processor and any
+# background frame are pickled once per worker, not once per frame.
+_WORKER = {}
+
+
+def _worker_init(kwargs):
+    _WORKER.update(kwargs)
+
+
+def _worker_frame(rec):
+    try:
+        return _single_frame(rec=rec, **_WORKER), None
+    except Exception:
+        import traceback
+        return None, traceback.format_exc()
+
+
+def _frame_results(proc, records, workers, frame_kw, log, should_stop):
+    """Yield (index, result, traceback) for every record.
+
+    workers <= 1 runs in this process, in record order. Otherwise frames run
+    in a process pool, submitted grouped by wavelength so one worker reuses
+    one LP-mode basis for every leg at that wavelength (building the basis is
+    the costliest step that is not per-frame); results arrive in that order.
+    """
+    if workers <= 1:
+        for i, rec in enumerate(records):
+            if should_stop():
+                return
+            try:
+                yield i, _single_frame(proc, rec, log=log, **frame_kw), None
+            except Exception:
+                import traceback
+                yield i, None, traceback.format_exc()
+        return
+
+    import copy
+    import multiprocessing
+    import os
+    from concurrent.futures import ProcessPoolExecutor
+
+    worker_proc = copy.copy(proc)
+    worker_proc._mode_cache = {}             # don't ship the parent's cache
+    order = sorted(range(len(records)),
+                   key=lambda i: (records[i]["wl"], records[i]["leg"] or 0))
+    # A chunk of one wavelength's legs shares one basis, but too few chunks
+    # leave workers idle at the end; aim for ~3 chunks per worker.
+    n_legs = len({r["leg"] for r in records}) or 1
+    chunk = max(1, min(n_legs, -(-len(records) // (3 * workers))))
+
+    # One BLAS thread per worker: N workers x 4 threads would oversubscribe the
+    # cores, and the single-frame search gains nothing from BLAS threads anyway
+    # (70-frame sweep, serial: 41.9 s at 1 thread, 42.7 s at 4). Workers inherit
+    # os.environ at spawn; holo's own cap keeps an explicitly set value. Agg
+    # because a worker has no GUI to draw into.
+    knobs = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "MPLBACKEND")
+    saved = {k: os.environ.get(k) for k in knobs}
+    os.environ.update({k: "1" for k in knobs[:-1]}, MPLBACKEND="Agg")
+    try:
+        ex = ProcessPoolExecutor(
+            workers, mp_context=multiprocessing.get_context("spawn"),
+            initializer=_worker_init,
+            initargs=(dict(frame_kw, proc=worker_proc),))
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    try:
+        jobs = [records[i] for i in order]
+        for i, (res, err) in zip(order, ex.map(_worker_frame, jobs,
+                                               chunksize=chunk)):
+            if should_stop():
+                return
+            yield i, res, err
+    finally:
+        ex.shutdown(wait=True, cancel_futures=True)
+
+
 # ── the pipeline ─────────────────────────────────────────────────────────────
 
 def process_records(proc, records, *, config, log=_noop_log, load=None,
                     background=None, ref_index=None, multiport_dir=None,
                     use_multiport=True, save=True, show=False,
-                    should_stop=lambda: False):
+                    should_stop=lambda: False, workers=1):
     """Reconstruct every record; return one summary row per successful frame.
 
     proc            a configured HolographyDataProcessor
@@ -116,9 +219,14 @@ def process_records(proc, records, *, config, log=_noop_log, load=None,
     ref_index       {wavelength_nm: path} reference library
     multiport_dir   directory holding MULTIPORT_FMT-named frames; defaults to
                     the processor's data_dir
+    workers         processes for the single-frame pass (frames are
+                    independent). >1 needs show=False; rows come back in
+                    record order either way.
     """
     load = load or proc.load_hologram
     bg_modifier = float(proc.proc_config.get("background_modifier", 1.0))
+    if show:
+        workers = 1                          # plots can't be shown from a worker
 
     legs = sorted({r["leg"] for r in records if r["leg"] is not None})
     wls = sorted({int(round(r["wl"])) for r in records})
@@ -128,22 +236,21 @@ def process_records(proc, records, *, config, log=_noop_log, load=None,
         mp_frames = run_multiport(multiport_dir or proc.data_dir, legs, wls,
                                   config, log)
 
-    rows = []
-    for i, rec in enumerate(records, 1):
-        if should_stop():
-            break
+    frame_kw = dict(load=load, background=background, ref_index=ref_index,
+                    bg_modifier=bg_modifier, save=save, show=show)
+    rows = {}
+    done = 0
+    for i, res, err in _frame_results(proc, records, workers, frame_kw, log,
+                                      should_stop):
+        done += 1
+        rec = records[i]
         label, leg, wl = rec["label"], rec["leg"], rec["wl"]
-        log(f"[{i}/{len(records)}] {label}  (leg={leg}, {wl} nm)", "INFO")
+        log(f"[{done}/{len(records)}] {label}  (leg={leg}, {wl} nm)", "INFO")
+        if err is not None:
+            log(f"  ✗ {label}: {err.strip().splitlines()[-1]}", "ERROR")
+            log(err, "DEBUG")
+            continue
         try:
-            hologram = proc.load_hologram(rec["path"])
-            bg = background
-            if bg is None:
-                bg = nearest_background(ref_index, wl, load, log)
-
-            res = proc.process_single_hologram(
-                hologram, wavelength_nm=wl, show_plots=show, save_plots=save,
-                plot_prefix=label, background=bg, bg_modifier=bg_modifier)
-
             fidelity = float(res["fidelity"])
             powers = [float(p) for p in res["mode_powers"]]
             engine = "single-frame"
@@ -166,19 +273,19 @@ def process_records(proc, records, *, config, log=_noop_log, load=None,
                          fidelity=fidelity,
                          recovered_field=res["recovered_field_corrected"])
 
-            rows.append({"filename": Path(rec["path"]).name,
-                         "source": label,
-                         "wavelength_nm": int(round(wl)),
-                         "fidelity": fidelity,
-                         "engine": engine,
-                         "mode_powers": powers})
+            rows[i] = {"filename": Path(rec["path"]).name,
+                       "source": label,
+                       "wavelength_nm": int(round(wl)),
+                       "fidelity": fidelity,
+                       "engine": engine,
+                       "mode_powers": powers}
             preview = "  ".join(f"{p*100:.1f}%" for p in powers[:5])
             log(f"  ✓ fidelity {fidelity:.4f} ({engine})  [{preview}]", "OK")
         except Exception as e:
             import traceback
             log(f"  ✗ {label}: {e}", "ERROR")
             log(traceback.format_exc(), "DEBUG")
-    return rows
+    return [rows[i] for i in sorted(rows)]
 
 
 def write_summary(results_dir, rows, folder=None, log=_noop_log):

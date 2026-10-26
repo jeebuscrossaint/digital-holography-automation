@@ -30,6 +30,7 @@ gui/           PySide6 app     main.py   GUI launcher
 
 ```
 holo process ./data      reconstruct a folder      holo doctor   check install
+holo process ./data -j 6  same, frames across 6 processes (bit-identical rows)
 holo tm ./data -o tm.npz transfer matrix -> .npz   holo probe switch
 holo acquire -o ./run    sweep lambda + save frames (all flags, no config edit)
 ```

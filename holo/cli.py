@@ -16,6 +16,7 @@ Run ``holo <command> --help`` for the options of any one command.
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -201,7 +202,8 @@ def cmd_process(args):
             load=discovery.load_frame, background=single_bg,
             ref_index=ref_index, multiport_dir=cache,
             use_multiport=not args.single,
-            save=not args.no_save, show=args.show)
+            save=not args.no_save, show=args.show,
+            workers=args.jobs if args.jobs > 0 else (os.cpu_count() or 1))
 
         if not args.no_save:
             pipeline.write_summary(proc.results_dir, rows, folder=folder, log=_log)
@@ -446,6 +448,9 @@ def build_parser():
                    help="print fidelities, write nothing")
     p.add_argument("--single", action="store_true",
                    help="single-frame only; skip the multiport pass")
+    p.add_argument("-j", "--jobs", type=int, default=1,
+                   help="processes for the single-frame pass; 0 = one per "
+                        "CPU (default 1)")
     p.set_defaults(func=cmd_process)
 
     p = common(sub.add_parser("tm", help="export the wavelength-resolved transfer matrix"))
