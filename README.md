@@ -25,7 +25,8 @@ The reconstruction follows the method in:
 
 - **Acquire** — for each lantern port (fiber switch) × wavelength (tunable
   laser), auto-optimize polarization for maximum fringe contrast, then capture
-  the off-axis hologram. Frames are validated (saturation/clipping is rejected).
+  the off-axis hologram. Frames are validated: clipping is flagged at any
+  ceiling, including cameras that clip below full scale.
 - **Reconstruct** — FFT the hologram → isolate the off-axis sideband →
   demodulate to baseband → Butterworth low-pass → inverse FFT to the complex
   field; optimize mode-field diameter, quadratic-phase correction, and position
@@ -95,7 +96,7 @@ docs/                       setup guides (GigE camera, Xeneth SDK)
 
 ```sh
 holo acquire -o ./run            # sweep 1530-1560 nm, 3 exposures per point
-holo process ./data              # reconstruct a folder of holograms
+holo process ./data              # reconstruct a folder (up to 8 processes)
 holo tm ./data -o tm.npz         # reconstruct + export the transfer matrix
 holo doctor                      # check the install, config and instruments
 holo probe switch                # talk to one instrument
@@ -158,50 +159,47 @@ the result can never be worse than single-frame.
 
 ## Status & known limits
 
-- Camera streaming, laser, motors, acquisition, the fringe auto-optimizer, and
-  saturation rejection all work.
-- Single-frame reconstruction reaches **0.9717** on the committed test frame
-  (15-mode basis; the 8-mode basis gives 0.9497 on the same frame).
-  Pixel scale, mode-field diameter, field position, and the defocus
-  quadratic-phase are *optimized numerically* (matching the paper — they are not
-  measured on the bench).
-- **That number is not directly comparable to the paper's 98%.** The paper
-  measures a 19-port lantern with a 23-mode basis; this config uses a 15-mode
-  basis on what the multiport path treats as a 7-port (8-mode) lantern. An
-  oversized basis inflates fidelity by absorbing noise — see **CLAUDE.md,
-  "Two open physics questions"**. Resolve the lantern's real mode count before
-  quoting a fidelity against the paper.
-- **Multiport is a verified reproduction of Caleb's analysis.** Carrier centroids
-  identical to 0.000 px, an identical interpolated twin image
-  (\|overlap\| = 1.000000), and mode decompositions matching to 0.997–0.9998
-  cosine similarity. On fidelity, **quote the scope with the number**:
+All fidelities below use the 8-mode basis unless stated otherwise, and each
+says how many frames it covers.
 
-  | consolidated run | frames | mean | σ | worst | < 95% |
-  |---|---|---|---|---|---|
-  | 3 λ (1525/1550/1575) × 19 legs | 57 | 96.76% | 0.95% | 93.7% | 1 |
-  | **full 51 λ × 19 legs** | **969** | **96.68%** | **1.58%** | **80.0%** | **37** |
+| data | frames | fidelity | notes |
+|---|---|---|---|
+| Jun 9 2026 sweep, port 1, 1525–1575 nm | 51 | **97.2 ± 0.5%**, worst 95.8% | background-subtracted |
+| Aug 4 2026 7-port sweep (Rumana Akhter), 1525–1569 nm | 215 of 315 | **92.7 ± 1.7%**, worst 83.9% | 100 frames clip at 45000 counts and are excluded |
+| Caleb's 19-port archive, multiport, 23 modes | 969 | 96.68 ± 1.58%, worst 80.0% | reproduces his own saved run (96.89%) |
+| committed test frame | 1 | 0.9776 (8 modes), 0.9788 (15 modes) | `GOLDEN_FIDELITY` |
 
-  The mean is stable across both (96.7%), so the reproduction holds. The spread
-  is not: over the full sweep σ is 1.58% and 37 frames fall below 95% (10 below
-  90%). Earlier revisions of this file quoted the 57-frame row as if it covered
-  the whole archive and concluded the consolidated basis beat Caleb's worst
-  frame (81.1%, 24 under 95%). On the full sweep it does not — 80.0% is his
-  worst, near enough. Whether his figures span 57 or 969 frames is unrecorded,
-  so treat that comparison as open rather than won.
-- **The paper's printed 98% ± 0.8% is not reproducible from that dataset** — not
-  here and not by Caleb's own saved run, which also lands at 96.9%. The ~1.1
-  point difference sits between his 2023 analysis and the published figure.
-  See **CLAUDE.md**, which also records why tuning the Butterworth passband to
-  hit 98% is a false fix. Pinned by `tests/test_multiport.py` (auto-skips
-  without the dataset, which is gitignored and multi-GB).
-- Multiport has **not** yet been validated on a leg × wavelength sweep from
-  *this* rig — only on the paper's data. On the rig data available today it
-  underperforms and the pipeline falls back to single-frame per frame.
-- The DiCon GP700 switch is being replaced — its driver may need updating for
-  the new unit.
+- **Speed:** Caleb's 969 frames run in 65 s through the paper's pipeline with
+  8 processes (5.3 min serial). The 315-frame 7-port sweep runs in 57 s
+  through both engines. Every speedup was checked to give identical output.
+- **Outside check:** a near-lossless lantern sends different ports to
+  orthogonal fields. On the 7-port sweep, different ports' fields overlap
+  0.113 on average (978 pairs), and the same port 1 nm apart overlaps 0.992.
+  This is necessary, not sufficient.
+- **Multiport on this rig's data** gives 68.9% on the 215 unclipped 7-port
+  frames, below single-frame. The cause is the shared basis centre. Each
+  port's light sits 9–16 px off it in a different direction, and forcing one
+  centre costs 12.5 points. The single-frame engine re-centres each frame,
+  which hides this. So an 8-mode basis around one axis does not fully describe
+  this lantern. Its core size will decide whether it needs more modes. Until
+  then, `pipeline` keeps the better engine per frame.
+- **Mode count is unconfirmed.** Doubling the basis from 8 to 15–17 modes
+  raises the Jun 9 fidelity only from 97.2% to 97.7%. Extra modes mostly fit
+  noise. See CLAUDE.md, "Two open physics questions."
+- **Multiport is a verified reproduction of Caleb's analysis.**
+  - Carrier centroids match to 0.000 px.
+  - The interpolated twin image matches (\|overlap\| = 1.000000).
+  - Mode decompositions match at 0.997–0.9998 cosine similarity.
+  - The paper's printed 98% ± 0.8% is not reproducible from that dataset,
+    here or by Caleb's own saved run (96.9%). Tuning the Butterworth passband
+    to reach 98% deletes real field content, which is a false fix.
+  - Pinned by `tests/test_multiport.py`. It skips unless the gitignored
+    dataset is unpacked to `_caleb_ref/`.
+- The DiCon GP700 switch is being replaced, and its driver may need updating
+  for the new unit.
 
 ## Credits
 
 Amarnath Patel (UCF Physics / CREOL, Eikenberry group), building on Caleb
-Dobias's original measurement and analysis work (see the paper above). Intended
-for ongoing use by Rumana Akhter.
+Dobias's original measurement and analysis work (see the paper above). The
+Aug 4 2026 7-port sweep was taken by Rumana Akhter with this software.
