@@ -57,3 +57,16 @@ def test_frames_without_a_leg_number_are_enumerated(tmp_path):
     records = discover(tmp_path, default_wl=1550)
     assert len(records) == 3
     assert sorted(r["leg"] for r in records) == [1, 2, 3]
+
+
+def test_reference_library_keeps_tenths(tmp_path):
+    # The Jun 9 reference library steps 0.1 nm as "wavelength1550p3". Each
+    # file must keep its own key, so a 1550 nm frame gets the 1550.0 reference
+    # and not whichever tenth sorts last.
+    from holo import discovery
+    for t in range(10):
+        np.save(tmp_path / f"leg01-wavelength1550p{t}.npy", np.zeros((8, 8)))
+    idx, single = discovery.build_ref_index(tmp_path)
+    assert single is None
+    assert sorted(idx) == [1550 + t / 10 for t in range(10)]
+    assert idx[1550.0].name == "leg01-wavelength1550p0.npy"

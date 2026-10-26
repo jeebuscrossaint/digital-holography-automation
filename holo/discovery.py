@@ -62,8 +62,14 @@ def load_frame(path):
 # ── parsing leg / wavelength out of a filename ───────────────────────────────
 
 def _wl_from_name(stem):
-    m = re.search(r"w(?:ave)?l(?:ength)?[\s_-]?(\d{3,4})", stem, re.I)
-    return float(m.group(1)) if m else None
+    # "wavelength1550p9" is 1550.9 nm (the 0.1-nm reference library). Dropping
+    # the decimal collapsed all ten references per nm onto one key, and the
+    # last one (x.9) was subtracted from every frame: Jun 9 sweep, 8 modes,
+    # 88.1% without background -> 80.1% with it.
+    m = re.search(r"w(?:ave)?l(?:ength)?[\s_-]?(\d{3,4})(?:[p.](\d+))?", stem, re.I)
+    if not m:
+        return None
+    return float(m.group(1) + ("." + m.group(2) if m.group(2) else ""))
 
 
 def _leg_from_name(stem):
