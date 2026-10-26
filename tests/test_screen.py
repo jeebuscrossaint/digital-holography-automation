@@ -51,3 +51,32 @@ def test_screened_search_matches_exhaustive(core_radius):
     assert (got["lp"], got["fov"], got["phase"]) == want[1:]
     # Position refinement only ever replaces the search's best with a better fit.
     assert res["fidelity"] >= want[0]
+
+
+def _exhaustive_offset(field, modes, lo, hi):
+    """findBestOffset before screening: every roll, exactly, first max wins."""
+    from holo.lib.calebsUsefulFunctions import _batchedReconstructionFidelity, rollMatrix
+    shifts = [(x, y) for x in range(lo, hi) for y in range(lo, hi)]
+    cands = np.stack([rollMatrix(field, x, y).ravel() for x, y in shifts])
+    return shifts[int(np.argmax(_batchedReconstructionFidelity(cands, modes)))]
+
+
+def test_screened_offset_matches_exhaustive():
+    """Real recovered field (fixture) plus noisy copies, 8-mode basis, the
+    single-frame engine's 13x13 roll search."""
+    from holo.data_processing import HolographyDataProcessor
+    from holo.lib.calebsUsefulFunctions import findBestOffset, rollMatrix
+    proc = HolographyDataProcessor()
+    proc._core_radius = 1.2e-5
+    holo = np.load(FIXTURES / "sample_hologram.npy").astype(float)
+    with contextlib.redirect_stdout(io.StringIO()):
+        res = proc.process_single_hologram(holo, wavelength_nm=1550)
+    p = res["best_params"]
+    modes = proc._modes_at(p["fov"], 1550e-9)[:p["nm"]]
+    field = res["recovered_field_corrected"]
+    rng = np.random.default_rng(0)
+    for k in range(4):
+        f = rollMatrix(field, 3 * k - 4, 2 - k) + 0.02 * k * (
+            rng.standard_normal(field.shape) + 1j * rng.standard_normal(field.shape))
+        got = tuple(int(v) for v in findBestOffset(f, modes, -6, 7, -6, 7, 1))
+        assert got == _exhaustive_offset(f, modes, -6, 7)

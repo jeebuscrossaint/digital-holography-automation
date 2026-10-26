@@ -400,15 +400,52 @@ def findBestOffset(field, modes, xstart=-5, xstop=5, ystart=-5,ystop=5,step =1):
         raise ValueError("findBestOffset: empty search range")
 
     field = np.asarray(field)
-    cands = np.empty((xs.size * ys.size, field.size), dtype=np.complex128)
-    k = 0
-    for x in xs:                       # x outer, y inner: preserves tie-break order
-        for y in ys:
-            cands[k] = rollMatrix(field, x, y).ravel()
-            k += 1
+    shifts = [(x, y) for x in xs for y in ys]   # x outer, y inner: tie-break order
+    if len(shifts) > _OFFSET_SCREEN_MIN and not np.iscomplexobj(modes):
+        keep = np.flatnonzero(_screenOffsets(field, np.asarray(modes), xs, ys))
+    else:
+        keep = np.arange(len(shifts))
+    cands = np.empty((keep.size, field.size), dtype=np.complex128)
+    for k, j in enumerate(keep):
+        cands[k] = rollMatrix(field, *shifts[j]).ravel()
 
-    best = int(np.argmax(_batchedReconstructionFidelity(cands, modes)))
+    best = int(keep[np.argmax(_batchedReconstructionFidelity(cands, modes))])
     return xs[best // ys.size], ys[best % ys.size]
+
+
+# Offset searches larger than this are screened first (the single-frame
+# engine's 13x13); smaller ones (multiport's 6x6) run exactly as before.
+_OFFSET_SCREEN_MIN = 64
+# The screen skips the complex64 rounding of the decomposition coefficients;
+# every shift within this of its best is re-evaluated exactly.
+_OFFSET_SCREEN_TOL = 1e-5
+
+
+def _screenOffsets(field, modes, xs, ys):
+    """Which rolls could be best, from every roll's fidelity in closed form.
+
+    Rolling the field only permutes its pixels, so its norm is unchanged and
+    its overlap with mode m at roll (x, y) is a circular cross-correlation:
+    sum_rc field[r, c] m[(r + y) % N, (c + x) % N], i.e. one FFT per mode
+    for all rolls at once. With coef = overlap / (|m| |field|) and G = M M^T,
+    the fidelity _batchedReconstructionFidelity computes is
+        Re(sum_i conj(coef_i) overlap_i) / (sqrt(coef^H G coef) |field|).
+    Returns a bool per (x, y), x outer, y inner.
+    """
+    n = modes.shape[0]
+    M = modes.reshape(n, -1)
+    N0, N1 = field.shape
+    Fc = np.conj(np.fft.fft2(np.conj(field)))
+    corr = np.fft.ifft2(Fc[None] * np.fft.fft2(modes), axes=(-2, -1))
+    num = corr[:, (ys[None, :] % N0), (xs[:, None] % N1)].reshape(n, -1)
+    field_norm = np.sqrt(np.vdot(field, field).real)
+    mode_norm = np.sqrt(np.einsum('ij,ij->i', M, M))
+    coef = num / (mode_norm[:, None] * field_norm)
+    G = M @ M.T
+    ov = np.einsum('ik,ik->k', coef.conj(), num).real
+    rec_norm = np.sqrt(np.einsum('ik,ij,jk->k', coef.conj(), G, coef).real)
+    fid = ov / (rec_norm * field_norm)
+    return fid >= np.nanmax(fid) - _OFFSET_SCREEN_TOL
 
 #note, field gets smaller with larger *diameter*. It's actually pixel size.
 def findBestDiameter(field, modesByDiameter):

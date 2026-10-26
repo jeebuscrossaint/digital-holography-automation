@@ -141,13 +141,28 @@ class HolographyDataProcessor:
                 NA=self._NA, wavelength=wavelength, rIndex=self._n_eff)
         return self._mode_cache[key]
 
-    def _recover_field(self, hologram, lp_cut, lp_order=4, dc_diameter=40):
+    def _recover_field(self, hologram, lp_cut, lp_order=4, dc_diameter=40,
+                       demodulated=None):
         """Off-axis recovery (Dobias et al., Opt. Express 2026, Sec. 2): FFT the
         raw intensity, locate the twin sideband sub-pixel, demodulate it to DC,
         Butterworth low-pass to isolate it, IFFT to the complex field. Returns
         (ES, centroid, selection).
 
         FFT the intensity directly — do NOT sqrt it.
+
+        ``demodulated`` is _demodulate(hologram, dc_diameter), if the caller
+        already has it: only the low-pass depends on lp_cut, so the search
+        computes the carrier once rather than once per cutoff."""
+        S, (cyy, cxx) = (demodulated if demodulated is not None
+                         else self._demodulate(hologram, dc_diameter))
+        N = S.shape[0]
+        Sd = S * makeButterworth(N, N // 2, N // 2, wc=lp_cut, n=lp_order)
+        # Sd = the isolated sideband (the "FFT selection"); ES = its inverse FFT.
+        return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx), Sd
+
+    def _demodulate(self, hologram, dc_diameter=40):
+        """Locate the carrier and shift the twin sideband to DC. Returns
+        (shifted spectrum, (row, col) carrier centroid).
 
         The carrier must be found by zeroing the DC cross and centre disk, then
         disk-blurring, then taking a Butterworth-weighted sub-pixel centroid.
@@ -170,10 +185,7 @@ class HolographyDataProcessor:
         u0, v0 = (cxx - cx) / N, (cyy - cy) / N               # carrier freq (cyc/px)
         Y, X = np.mgrid[0:N, 0:N]
         demod = H * np.exp(-2j * np.pi * (u0 * X + v0 * Y))    # shift twin -> DC
-        Sd = np.fft.fftshift(np.fft.fft2(demod)) * makeButterworth(
-            N, cx, cy, wc=lp_cut, n=lp_order)                 # verified Butterworth
-        # Sd = the isolated sideband (the "FFT selection"); ES = its inverse FFT.
-        return np.fft.ifft2(np.fft.ifftshift(Sd)), (cyy, cxx), Sd
+        return np.fft.fftshift(np.fft.fft2(demod)), (cyy, cxx)
 
     def _center_on_beam(self, ES, size):
         """Crop a size×size window centered on the beam, via getBlurredCentroid
@@ -262,7 +274,9 @@ class HolographyDataProcessor:
         # 13 unique masks once instead of regenerating one per (lp, fov, phase).
         phase_masks = {float(pf): generatePhaseMask(grid, pf)
                        for pf in self._phases}
-        recovered = [self._recover_field(hologram, lp) for lp in self._lp_cuts]
+        demodulated = self._demodulate(hologram)
+        recovered = [self._recover_field(hologram, lp, demodulated=demodulated)
+                     for lp in self._lp_cuts]
         bases = [normalizeIntensity(self._center_on_beam(ES_full, grid))
                  for ES_full, _, _ in recovered]
         mode_sets = [self._modes_at(fov, wl_m) for fov in self._fovs]
