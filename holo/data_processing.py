@@ -177,7 +177,13 @@ class HolographyDataProcessor:
         # (the off-axis sideband). getMaxIndex returns (row, col).
         Pdc = filterDCComponents(np.abs(F).astype(float), 1, dc_diameter)
         blur = signal.convolve2d(Pdc, generateMask(15, 15), mode='same')
-        pky, pkx = getMaxIndex(blur)
+        # Choose the lobe by POWER, not amplitude. Some frames carry two
+        # sidebands: the same field read against two reference beams (Aug 4
+        # 2026 7-port and Jun 9 sweeps). The two can tie in blurred amplitude
+        # while the stronger reference carries 1.1-20x the power. The
+        # stronger one has the better SNR, and it was the June engine's pick.
+        pky, pkx = getMaxIndex(signal.convolve2d(Pdc ** 2, generateMask(15, 15),
+                                                 mode='same'))
         # Butterworth-weight around that lobe and take the sub-pixel centroid
         # (makeButterworth's center is (X=col, Y=row) -> pass (pkx, pky)).
         bw = makeButterworth(N, pkx, pky, wc=15)
