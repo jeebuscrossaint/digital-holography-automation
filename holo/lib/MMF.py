@@ -52,13 +52,32 @@ def LP_mismatch(coreRadius, nCore, nCladding, wavelength, order, u):
     residual = coreTerm + claddingTerm # Calculate mismatch
     return residual
 
-def GET_LP_mode(X, Y, order, u, w, coreRadius):
+def _polar_grid(X, Y, coreRadius):
+    """Polar coordinates, core/cladding masks and the distinct radii of each
+    region. Identical for every mode on one grid, so GET_LP_mode can take
+    them precomputed instead of re-sorting the grid per mode."""
+    angle, rad = np.arctan2(Y, X), np.sqrt(X**2 + Y**2)
+    inCore = rad <= coreRadius
+    inCladding = rad > coreRadius
+    return (angle, inCore, inCladding,
+            np.unique(rad[inCore], return_inverse=True),
+            np.unique(rad[inCladding], return_inverse=True))
+
+
+# modes2 is called on the same few grids (one per FOV candidate) for every
+# wavelength, so keep each grid's polar data across calls.
+_GRIDS = {}
+
+
+def GET_LP_mode(X, Y, order, u, w, coreRadius, grid=None):
     
     dx = abs(X[0, 0] - X[0, 1])
     dy = abs(Y[0, 1] - Y[1, 1])
 
     # Convert to polar coordinates
-    angle, rad = np.arctan2(Y, X), np.sqrt(X**2 + Y**2)
+    if grid is None:
+        grid = _polar_grid(X, Y, coreRadius)
+    angle, inCore, inCladding, coreRadii, claddingRadii = grid
 
     # Initialize mode profiles
     modeCos = np.zeros_like(X)
@@ -68,20 +87,16 @@ def GET_LP_mode(X, Y, order, u, w, coreRadius):
     cosTerm = np.cos(order * angle)
     sinTerm = np.sin(order * angle)
 
-    # Define core and cladding regions
-    inCore = rad <= coreRadius
-    inCladding = rad > coreRadius
-
     # Compute core and cladding functions. The Bessel calls are ~80% of mode
     # generation, so evaluate each only where it is used (jv in the core, kv in
     # the cladding) and only once per distinct radius (the square grid repeats
     # radii ~8x). Same inputs to the same functions: results are bit-identical.
-    def radial(fn, arg_scale, norm, region):
-        r_unique, inverse = np.unique(rad[region], return_inverse=True)
+    def radial(fn, arg_scale, norm, radii):
+        r_unique, inverse = radii
         return (fn(order, arg_scale * r_unique) / norm)[inverse]
 
-    coreBessel = radial(jv, u / coreRadius, jv(order, u), inCore)
-    claddingBessel = radial(kv, w / coreRadius, kv(order, w), inCladding)
+    coreBessel = radial(jv, u / coreRadius, jv(order, u), coreRadii)
+    claddingBessel = radial(kv, w / coreRadius, kv(order, w), claddingRadii)
 
     # Compute mode profiles
     modeCos[inCore] = coreBessel * cosTerm[inCore]
@@ -250,8 +265,14 @@ class MMF():
         MDS = []
         counter = 0
     
+        key = (self.N, self.pxz, self.r_core)
+        if key not in _GRIDS:
+            if len(_GRIDS) >= 64:              # ~1 MB each at N=200; a sweep uses ~11
+                _GRIDS.clear()
+            _GRIDS[key] = _polar_grid(self.XX, self.YY, self.r_core)
         for lp in LP:
-            mC, mS = GET_LP_mode(self.XX,self.YY, lp["l"], lp["u"], lp["w"], self.r_core)
+            mC, mS = GET_LP_mode(self.XX,self.YY, lp["l"], lp["u"], lp["w"], self.r_core,
+                                 grid=_GRIDS[key])
     
             # Store cosine component
             MDS.append(mC)
