@@ -30,7 +30,7 @@ gui/           PySide6 app     main.py   GUI launcher
 
 ```
 holo process ./data      reconstruct a folder      holo doctor   check install
-holo process ./data -j 6  same, frames across 6 processes (bit-identical rows)
+holo process ./data -j 1  same, serial (default -j 0 = auto, up to 8 processes)
 holo tm ./data -o tm.npz transfer matrix -> .npz   holo probe switch
 holo acquire -o ./run    sweep lambda + save frames (all flags, no config edit)
 ```
@@ -109,4 +109,4 @@ the old notes here measured 3 wavelengths x 19 legs = **57 frames**: 96.76% +/-
 0.95%, worst 93.7%. The full 51 x 19 = **969 frames** gives 96.68% +/- 1.58%,
 worst **80.0%**, 37 frames under 95%. The mean is stable, the tail is not, and
 the 57-frame row was being quoted as if it covered the archive. A full sweep is
-~5 min (`reconstruct_all`, 0.33 s/frame, measured 2026-10-26) — cheap enough to just run.
+65 s with `reconstruct_all(workers=8)`, 5.3 min serial (measured 2026-10-26) — cheap enough to just run.

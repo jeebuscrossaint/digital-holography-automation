@@ -160,6 +160,13 @@ def cmd_acquire(args):
     return 0
 
 
+def _jobs(n):
+    """-j N: N processes; 0 = auto. Auto caps at 8: on a 22-thread laptop,
+    8 workers ran Caleb's 969-frame sweep in 65 s and 12 took 87 s, and the
+    single-frame pass on 315 frames took 21 s at 8 vs 55 s at 22."""
+    return n if n > 0 else min(8, os.cpu_count() or 1)
+
+
 # ── holo process ─────────────────────────────────────────────────────────────
 
 def cmd_process(args):
@@ -203,7 +210,7 @@ def cmd_process(args):
             ref_index=ref_index, multiport_dir=cache,
             use_multiport=not args.single,
             save=not args.no_save, show=args.show,
-            workers=args.jobs if args.jobs > 0 else (os.cpu_count() or 1))
+            workers=_jobs(args.jobs))
 
         if not args.no_save:
             pipeline.write_summary(proc.results_dir, rows, folder=folder, log=_log)
@@ -265,7 +272,8 @@ def cmd_tm(args):
         n_eff=float(mp.get("effective_index", 1.453)),
         diameter_range=(20, 90), pol_half=None, ref_wavelength=wls[0])
 
-    out = R.reconstruct_all(progress=(lambda s: print("  " + s)) if args.verbose else None)
+    out = R.reconstruct_all(progress=(lambda s: print("  " + s)) if args.verbose else None,
+                            workers=_jobs(args.jobs))
     fid = np.asarray(out["fidelity"], dtype=float)
     tm = out["transfer_matrices"]
 
@@ -456,9 +464,9 @@ def build_parser():
                    help="print fidelities, write nothing")
     p.add_argument("--single", action="store_true",
                    help="single-frame only; skip the multiport pass")
-    p.add_argument("-j", "--jobs", type=int, default=1,
-                   help="processes for the single-frame pass; 0 = one per "
-                        "CPU (default 1)")
+    p.add_argument("-j", "--jobs", type=int, default=0,
+                   help="processes for both engines; 0 = auto, up to 8 "
+                        "(default 0); 1 = serial")
     p.set_defaults(func=cmd_process)
 
     p = common(sub.add_parser("tm", help="export the wavelength-resolved transfer matrix"))
@@ -468,6 +476,8 @@ def build_parser():
     p.add_argument("--nfft", type=int, default=64)
     p.add_argument("--mode-size", type=int, default=180, dest="mode_size")
     p.add_argument("-v", "--verbose", action="store_true", help="per-frame progress")
+    p.add_argument("-j", "--jobs", type=int, default=0,
+                   help="processes; 0 = auto, up to 8 (default 0); 1 = serial")
     p.set_defaults(func=cmd_tm)
 
     p = sub.add_parser("doctor", help="check the install, config and instruments")

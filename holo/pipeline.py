@@ -65,7 +65,7 @@ def nearest_background(ref_index, wl, load, log=_noop_log):
 
 # ── multiport pass ───────────────────────────────────────────────────────────
 
-def run_multiport(data_dir, legs, wavelengths, config, log=_noop_log):
+def run_multiport(data_dir, legs, wavelengths, config, log=_noop_log, workers=1):
     """Run the cross-port reconstruction over the whole sweep.
 
     Returns ``{(leg, wl): frame_result}``, or ``{}`` if it could not run — the
@@ -93,7 +93,7 @@ def run_multiport(data_dir, legs, wavelengths, config, log=_noop_log):
             diameter_range=(20, 90),
             pol_half=None,                       # single-polarisation rig
             ref_wavelength=wavelengths[0])
-        out = mp.reconstruct_all()
+        out = mp.reconstruct_all(workers=workers)
         log(f"Multiport mean fidelity {float(np.mean(out['fidelity'])):.3f} — "
             f"keeping the better of multiport/single-frame per frame", "INFO")
         return out.get("frames", {})
@@ -246,7 +246,7 @@ def process_records(proc, records, *, config, log=_noop_log, load=None,
     mp_frames = {}
     if use_multiport and len(legs) >= 2:
         mp_frames = run_multiport(multiport_dir or proc.data_dir, legs, wls,
-                                  config, log)
+                                  config, log, workers=workers)
 
     val = ((config.get("experiment") or {}).get("validation") or {})
     frame_kw = dict(load=load, background=background, ref_index=ref_index,

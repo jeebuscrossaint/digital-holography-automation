@@ -4,6 +4,7 @@ Created on Thu Aug 21 14:57:09 2025
 
 @author: ca109683
 """
+import functools
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -493,6 +494,31 @@ def makeButterworth(N,centerX=0, centerY=0, wc=15,n=3):
     W = np.sqrt((X-centerX)**2 + (Y-centerY)**2)
     return (1/(1+(W/wc)**(2*n)))
 
+# The sinc/phasor kernels depend only on the geometry and the carrier offset,
+# which every port shares at one wavelength. Building them is ~70% of a call,
+# so build once per offset; the arrays are read-only and the arithmetic is the
+# same, so results are bit-identical.
+@functools.lru_cache(maxsize=128)
+def _fourier_interp_kernels(N0, span, output_size, sample_limit, ox, oy):
+    out_min = N0/2-span/2
+    out_max = out_min + span
+    r_vec_x = np.linspace(out_min, out_max, output_size+1)[0:output_size] + ox
+    r_vec_y = np.linspace(out_min, out_max, output_size+1)[0:output_size] + oy
+    sample_min = (N0 - sample_limit)//2
+    sample_max = sample_min + sample_limit
+    Kx = np.arange(N0)[sample_min:sample_max] + round(ox)
+    Ky = np.arange(N0)[sample_min:sample_max] + round(oy)
+    # Meshgrid can get pretty memory intensive
+    kx1, ky1, rx1= np.meshgrid(Kx.astype(complex), Ky.astype(complex), r_vec_x.astype(complex), indexing='ij')
+    rx2, ky2, ry2= np.meshgrid(r_vec_x.astype(complex), Ky.astype(complex), r_vec_y.astype(complex), indexing='ij')
+    kernel_x = np.sinc(rx1 - kx1)
+    kernel_y = np.sinc(ry2 - ky2).T
+    phasor_x = np.exp(-1j * np.pi * ((rx1 - kx1) / N0))
+    phasor_y = np.exp(-1j * np.pi * ((ry2 - ky2) / N0))
+    for k in (kernel_x, kernel_y, phasor_x, phasor_y):
+        k.flags.writeable = False
+    return kernel_x, kernel_y, phasor_x, phasor_y
+
 def fourier_interp_2d(img, span=32, output_size=64, sample_limit=32, offset=(0,0)): 
     '''
     Interpolate using Fourier Fine-Binning Method (Ransom 2002).
@@ -543,15 +569,9 @@ def fourier_interp_2d(img, span=32, output_size=64, sample_limit=32, offset=(0,0
     A_k = img[sample_min+round(offset[0]):sample_max+round(offset[0]),
               sample_min+round(offset[1]):sample_max+round(offset[1])]
    
-    # Meshgrid can get pretty memory intensive
-    kx1, ky1, rx1= np.meshgrid(Kx.astype(complex), Ky.astype(complex), r_vec_x.astype(complex), indexing='ij')
-    rx2, ky2, ry2= np.meshgrid(r_vec_x.astype(complex), Ky.astype(complex), r_vec_y.astype(complex), indexing='ij')
-   
-    kernel_x = np.sinc(rx1 - kx1)
-    kernel_y = np.sinc(ry2 - ky2).T
-   
-    phasor_x = np.exp(-1j * np.pi * ((rx1 - kx1) / N0))
-    phasor_y = np.exp(-1j * np.pi * ((ry2 - ky2) / N0))
+    kernel_x, kernel_y, phasor_x, phasor_y = _fourier_interp_kernels(
+        N0, float(span), int(output_size), int(sample_limit),
+        float(offset[0]), float(offset[1]))
    
    
     # XXX: x and y flipping might need to be accounted for

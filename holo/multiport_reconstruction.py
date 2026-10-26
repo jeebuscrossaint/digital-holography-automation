@@ -156,6 +156,7 @@ class MultiPortReconstructor:
 
         self._center = None        # (row, col) common beam centre
         self._xC = self._yC = None  # fitted carrier centroid vs wavelength index
+        self._fields = {}           # (leg, wl_index) -> extracted field; carrier-dependent
         self._modes_by_diam = None
 
     # ── data ─────────────────────────────────────────────────────────────────
@@ -197,22 +198,33 @@ class MultiPortReconstructor:
         return self._center
 
     # ── step 2: cross-port carrier centroid + linear fit vs wavelength ──────────
-    def fit_carrier_centroids(self):
+    def _sideband_maps(self, wl):
+        """Cross-port sideband maps at one wavelength: (blurred amplitude,
+        power, argmax of the blurred amplitude)."""
+        fa = np.zeros((self.crop, self.crop))
+        pa = np.zeros((self.crop, self.crop))
+        for leg in self.legs:
+            c = cropArray(self._load(leg, wl).astype(float), self._center, self.crop)
+            f = filterDCComponents(np.fft.fftshift(np.fft.fft2(c)), 1, 40)
+            f = self._zero_fft_half(f)
+            fa = fa + np.abs(f)
+            pa = pa + np.abs(f) ** 2
+        fc = scipy.signal.convolve2d(fa, generateMask(15, 15), mode="same")
+        return fc, pa, _argmax2d(fc)
+
+    def fit_carrier_centroids(self, workers=1):
         if self._center is None:
             self.find_beam_center()
         cents = np.zeros((len(self.wavelengths), 2))
-        fcs, pas, pks = [], [], []
-        for i, wl in enumerate(self.wavelengths):
-            fa = np.zeros((self.crop, self.crop))
-            pa = np.zeros((self.crop, self.crop))
-            for leg in self.legs:
-                c = cropArray(self._load(leg, wl).astype(float), self._center, self.crop)
-                f = filterDCComponents(np.fft.fftshift(np.fft.fft2(c)), 1, 40)
-                f = self._zero_fft_half(f)
-                fa = fa + np.abs(f)
-                pa = pa + np.abs(f) ** 2
-            fc = scipy.signal.convolve2d(fa, generateMask(15, 15), mode="same")
-            fcs.append(fc); pas.append(pa); pks.append(_argmax2d(fc))
+        if workers > 1:
+            from concurrent.futures import ProcessPoolExecutor
+            import multiprocessing
+            with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"),
+                                     initializer=_mp_worker_init, initargs=(self,)) as ex:
+                maps = list(ex.map(_mp_worker_maps, self.wavelengths))
+        else:
+            maps = [self._sideband_maps(wl) for wl in self.wavelengths]
+        fcs = [m[0] for m in maps]; pas = [m[1] for m in maps]; pks = [m[2] for m in maps]
         pks = self._pin_carrier(fcs, pas, pks)
         for i, (fc, pk) in enumerate(zip(fcs, pks)):
             bf = makeButterworth(self.crop, pk[1], pk[0])
@@ -225,11 +237,13 @@ class MultiPortReconstructor:
             my, cy = np.polyfit(idx, cents[:, 1], 1)
             self._xC = idx * mx + cx
             self._yC = idx * my + cy
+            self._fields = {}
         else:
             # Single wavelength: nothing to fit — use the (cross-port-averaged)
             # centroid directly. np.polyfit(deg=1) needs >=2 points and errors.
             self._xC = cents[:, 0].copy()
             self._yC = cents[:, 1].copy()
+            self._fields = {}
         return self._xC, self._yC
 
     def _pin_carrier(self, fcs, pas, pks, radius=12):
@@ -268,6 +282,14 @@ class MultiPortReconstructor:
 
     # ── step 3: sub-pixel field extraction for one frame ────────────────────────
     def extract_field(self, leg, wl_index):
+        # Pass 2 of reconstruct_all re-decomposes every frame; the field only
+        # depends on the frame and the fitted carrier, so extract it once.
+        key = (leg, wl_index)
+        if key not in self._fields:
+            self._fields[key] = self._extract_field(leg, wl_index)
+        return self._fields[key]
+
+    def _extract_field(self, leg, wl_index):
         c = cropArray(self._load(leg, self.wavelengths[wl_index]).astype(float),
                       self._center, self.crop)
         fft = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(c)))
@@ -368,7 +390,7 @@ class MultiPortReconstructor:
         return diameter, (xo, yo), phase_of
 
     # ── full sweep → transfer matrices ──────────────────────────────────────────
-    def reconstruct_all(self, progress=None, consistent_basis=True):
+    def reconstruct_all(self, progress=None, consistent_basis=True, workers=1):
         """Reconstruct every (leg, wavelength). Returns dict with:
         transfer_matrices [n_wl][n_mode, n_leg], fidelity [n_wl, n_leg],
         and the per-frame results. ``progress`` is an optional callback(str).
@@ -385,21 +407,38 @@ class MultiPortReconstructor:
 
         Pass ``consistent_basis=False`` to get the raw per-frame optima — useful
         for reporting the best achievable single-frame fidelity, not for a TM.
+
+        ``workers`` > 1 runs pass 1 in a process pool, one wavelength per
+        task. Frames are independent once the carrier is fit, so the results
+        are the same as the serial loop.
         """
         if self._xC is None:
-            self.fit_carrier_centroids()
+            self.fit_carrier_centroids(workers=workers)
         nL, nW = len(self.legs), len(self.wavelengths)
         n_mode = self._modes().shape[1]
 
         # Pass 1 — per-frame optimisation.
         per_frame = {}
-        for wi in range(nW):
-            for leg in self.legs:
-                r = self.reconstruct_frame(leg, wi)
-                per_frame[(leg, wi)] = r
-                if progress:
-                    progress(f"λ={self.wavelengths[wi]}nm leg={leg} "
-                             f"fidelity={r['fidelity']*100:.1f}%")
+        if workers > 1:
+            from concurrent.futures import ProcessPoolExecutor
+            import multiprocessing
+            with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"),
+                                     initializer=_mp_worker_init, initargs=(self,)) as ex:
+                for wi, rows in zip(range(nW), ex.map(_mp_worker_wavelength, range(nW))):
+                    for leg, r in rows:
+                        per_frame[(leg, wi)] = r
+                        self._fields[(leg, wi)] = r.pop("raw_field")
+                        if progress:
+                            progress(f"λ={self.wavelengths[wi]}nm leg={leg} "
+                                     f"fidelity={r['fidelity']*100:.1f}%")
+        else:
+            for wi in range(nW):
+                for leg in self.legs:
+                    r = self.reconstruct_frame(leg, wi)
+                    per_frame[(leg, wi)] = r
+                    if progress:
+                        progress(f"λ={self.wavelengths[wi]}nm leg={leg} "
+                                 f"fidelity={r['fidelity']*100:.1f}%")
 
         params = None
         if consistent_basis and per_frame:
@@ -427,3 +466,27 @@ class MultiPortReconstructor:
                 "legs": self.legs, "wavelengths": self.wavelengths,
                 "carrier_x": self._xC, "carrier_y": self._yC,
                 "basis": params}
+
+
+# ── process-pool workers for reconstruct_all(workers=N) ─────────────────────
+_MP = {}
+
+
+def _mp_worker_init(reconstructor):
+    _MP["r"] = reconstructor
+
+
+def _mp_worker_wavelength(wi):
+    """Pass 1 for every leg at one wavelength. Returns the extracted field too,
+    so the parent's pass 2 doesn't extract it again."""
+    r = _MP["r"]
+    out = []
+    for leg in r.legs:
+        res = r.reconstruct_frame(leg, wi)
+        res["raw_field"] = r.extract_field(leg, wi)
+        out.append((leg, res))
+    return out
+
+
+def _mp_worker_maps(wl):
+    return _MP["r"]._sideband_maps(wl)
