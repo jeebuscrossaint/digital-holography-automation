@@ -43,3 +43,15 @@ def test_worker_pool_matches_serial(records):
     assert len(rows[1]) == len(records)
     assert rows[2] == rows[1]
     assert [r["source"] for r in rows[2]] == [r["label"] for r in records]
+
+
+def test_clipped_frame_is_flagged_not_dropped(records):
+    # A frame clipped below 65535 still gets a row (raw data is never
+    # dropped), but the row says its fidelity is not a measurement.
+    from holo import pipeline
+    frame = np.load(records[0]["path"])
+    np.save(records[0]["path"], np.minimum(frame, np.percentile(frame, 98)))
+    rows = pipeline.process_records(
+        _small_processor(), records[:2], config={}, use_multiport=False,
+        save=False)
+    assert [r["saturated"] for r in rows] == [True, False]

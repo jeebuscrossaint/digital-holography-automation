@@ -210,6 +210,14 @@ def cmd_process(args):
         if rows:
             mean = sum(r["fidelity"] for r in rows) / len(rows)
             print(f"\n{folder}: mean fidelity {mean:.4f} over {len(rows)} frames")
+            clean = [r["fidelity"] for r in rows if not r["saturated"]]
+            if len(clean) < len(rows):
+                # Clipped frames drag the mean down by an amount that is
+                # exposure, not physics, so report the clean set alongside.
+                tail = (f"{sum(clean) / len(clean):.4f} over the {len(clean)} "
+                        f"unsaturated" if clean else "no unsaturated frames")
+                print(f"  {len(rows) - len(clean)} SATURATED (fidelity not a "
+                      f"measurement); {tail}")
             if not args.no_save:
                 print(f"  -> {proc.results_dir}")
         else:

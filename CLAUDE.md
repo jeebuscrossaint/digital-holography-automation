@@ -72,6 +72,9 @@ contain multi-GB `.spydata`/`.pkl` binaries and filenames with spaces — never
   8-bit and saturates the frame.
 - **Saturated frames are invalid physics** — clipping makes intensity nonlinear
   in the field, so amplitude and phase are both wrong.
+  The ceiling is not always 65535: the Aug 4 2026 7-port archive clips at
+  45000 (100/315 frames). `check_saturation` catches a pile-up at any max;
+  `holo process` flags those rows `saturated` and reports the clean mean.
 - **Camera connects but no frames** = Windows Firewall blocking inbound GigE, or
   Xeneth holding the camera. Not a light problem.
 - Worker threads never touch widgets — they call `self._post(msg)`.

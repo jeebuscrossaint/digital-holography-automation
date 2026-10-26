@@ -76,6 +76,16 @@ def test_clipped_frame_is_saturated():
     assert sat["max_value"] == 65535
 
 
+def test_clip_below_full_scale_is_saturated():
+    # A ceiling under sat_level (the Aug 4 2026 archive clips at 45000) shows
+    # up as a pile-up on the frame maximum, not as pixels near 65535.
+    frame = np.minimum(_fringes() * 50000, 40000).astype(np.uint16)
+    sat = check_saturation(frame, sat_level=65535, sat_fraction_max=0.001)
+    assert sat["saturated"] is True
+    assert sat["clip_level"] == 40000
+    assert sat["n_saturated"] == np.count_nonzero(frame == 40000)
+
+
 def test_saturation_fraction_threshold():
     frame = np.zeros((256, 256), np.uint16)
     frame[0, 0] = 65535                                # a single hot pixel

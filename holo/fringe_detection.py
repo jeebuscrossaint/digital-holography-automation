@@ -213,21 +213,37 @@ def check_saturation(image, sat_level=65535, sat_fraction_max=0.001,
         near_full: count pixels >= near_full*sat_level as saturated, to catch
                    clipping that lands just under the ceiling after NUC
 
+    A ceiling below sat_level is caught too: clipping piles pixels up on one
+    exact value at the frame maximum, while the top of an unclipped frame is
+    sparse. The Aug 4 2026 7-port archive clips at 45000 (1134 pixels at
+    exactly 45000 in one frame, ~40 per 450-count bin just below), which a
+    fixed 0.97 x 65535 threshold never sees.
+
     Returns:
-        dict: {saturated, fraction, n_saturated, max_value, fill_fraction}
+        dict: {saturated, fraction, n_saturated, max_value, fill_fraction,
+               clip_level}
               `saturated` True => data should be considered invalid.
+              clip_level is the ceiling the verdict used: sat_level's
+              threshold, or the frame maximum when that is a pile-up.
     """
     arr = np.asarray(image)
     sat_thresh = near_full * sat_level
     n_sat = int(np.count_nonzero(arr >= sat_thresh))
+    clip_level = sat_thresh
+    mx = arr.max() if arr.size else 0
+    if mx > 0 and mx < sat_thresh:
+        n_max = int(np.count_nonzero(arr == mx))
+        n_below = int(np.count_nonzero((arr >= 0.99 * mx) & (arr < mx)))
+        if n_max > 4 * n_below:
+            n_sat, clip_level = n_max, mx
     frac = n_sat / arr.size if arr.size else 0.0
-    mx = int(arr.max()) if arr.size else 0
     return {
         "saturated": frac > sat_fraction_max,
         "fraction": frac,
         "n_saturated": n_sat,
-        "max_value": mx,
-        "fill_fraction": mx / sat_level if sat_level else 0.0,
+        "max_value": int(mx),
+        "fill_fraction": int(mx) / sat_level if sat_level else 0.0,
+        "clip_level": float(clip_level),
     }
 
 

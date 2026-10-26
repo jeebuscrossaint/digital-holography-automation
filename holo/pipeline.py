@@ -27,6 +27,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from .fringe_detection import check_saturation
+
 # Filename layout the multiport engine expects; process.py stages arbitrary
 # inputs into this form, and the collector writes it natively.
 MULTIPORT_FMT = "leg{leg:02d}-wavelength{wl:04d}.npy"
@@ -107,19 +109,27 @@ _RESULT_KEYS = ("fidelity", "mode_powers", "mode_decomposition",
 
 
 def _single_frame(proc, rec, *, load, background, ref_index, bg_modifier,
-                  save, show, log=_noop_log):
+                  save, show, sat_level=65535, sat_frac_max=0.001,
+                  log=_noop_log):
     """Load, background-subtract and reconstruct one record.
 
     Depends only on the record, so the serial loop and the worker pool both
-    call it and produce the same numbers."""
+    call it and produce the same numbers. A clipped frame is still
+    reconstructed (raw data is never dropped) but comes back flagged: its
+    fidelity is not a measurement."""
     hologram = proc.load_hologram(rec["path"])
+    sat = check_saturation(hologram, sat_level=sat_level,
+                           sat_fraction_max=sat_frac_max)
     bg = background
     if bg is None:
         bg = nearest_background(ref_index, rec["wl"], load, log)
     res = proc.process_single_hologram(
         hologram, wavelength_nm=rec["wl"], show_plots=show, save_plots=save,
         plot_prefix=rec["label"], background=bg, bg_modifier=bg_modifier)
-    return {k: res[k] for k in _RESULT_KEYS}
+    out = {k: res[k] for k in _RESULT_KEYS}
+    out["saturated"] = bool(sat["saturated"])
+    out["saturated_fraction"] = float(sat["fraction"])
+    return out
 
 
 # Per-worker state, set once by _worker_init so the processor and any
@@ -236,8 +246,11 @@ def process_records(proc, records, *, config, log=_noop_log, load=None,
         mp_frames = run_multiport(multiport_dir or proc.data_dir, legs, wls,
                                   config, log)
 
+    val = ((config.get("experiment") or {}).get("validation") or {})
     frame_kw = dict(load=load, background=background, ref_index=ref_index,
-                    bg_modifier=bg_modifier, save=save, show=show)
+                    bg_modifier=bg_modifier, save=save, show=show,
+                    sat_level=float(val.get("saturation_level", 65535)),
+                    sat_frac_max=float(val.get("max_saturated_fraction", 0.001)))
     rows = {}
     done = 0
     for i, res, err in _frame_results(proc, records, workers, frame_kw, log,
@@ -278,9 +291,14 @@ def process_records(proc, records, *, config, log=_noop_log, load=None,
                        "wavelength_nm": int(round(wl)),
                        "fidelity": fidelity,
                        "engine": engine,
+                       "saturated": res["saturated"],
                        "mode_powers": powers}
             preview = "  ".join(f"{p*100:.1f}%" for p in powers[:5])
             log(f"  ✓ fidelity {fidelity:.4f} ({engine})  [{preview}]", "OK")
+            if res["saturated"]:
+                log(f"  ⚠ SATURATED — {res['saturated_fraction']*100:.2f}% of "
+                    f"pixels clipped; this fidelity is not a measurement",
+                    "WARN")
         except Exception as e:
             import traceback
             log(f"  ✗ {label}: {e}", "ERROR")
