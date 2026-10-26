@@ -30,6 +30,56 @@ from .lib.calebsUsefulFunctions import (
 
 _ROOT = Path(__file__).parent
 
+# The screen below skips modeDecomp's complex64 rounding, so its eta differs
+# from the exact search by ~1e-11. Every combination within this of the
+# screened maximum is re-evaluated exactly, which makes the chosen parameters
+# (and so every output) identical to searching all of them exactly.
+_SCREEN_TOL = 1e-6
+
+
+def _screen_candidates(bases, mode_sets, num_modes, masks):
+    """Which (cutoff, FOV, phase) combinations could be the best fit.
+
+    Returns a bool array (len(bases), len(mode_sets), len(masks)). Computes the
+    same eta as the search loop for all of them at once, from overlaps alone:
+    with |fld| = 1 and real modes m_i,
+
+        a_i = <fld, m_i>,  dec_i = a_i / |m_i|,  <fld, rec> = sum conj(dec_i) a_i,
+        |rec|^2 = dec^H G dec,  G = M M^T,
+
+    so one (n_fields, px) x (px, n_modes_total) product replaces 429 rounds of
+    modeDecomp + combinedOutput + overlap2FieldsV2. One 7-port frame: ~25 ms
+    for the screen vs ~450-770 ms for the exact loop over every combination.
+    The same screen on the GPU (CuPy, RTX 4070 Laptop) took 15 ms -- not
+    worth a CUDA dependency once the algebra is right.
+    """
+    nms = {min(num_modes, m.shape[0]) for m in mode_sets}
+    shape = (len(bases), len(mode_sets), len(masks))
+    if len(nms) != 1:                   # ragged bases: screen nothing out
+        return np.ones(shape, bool)
+    nm = nms.pop()
+    B = np.stack([b.ravel() for b in bases])                    # (L, px)
+    PM = np.stack([m.ravel() for m in masks])                   # (P, px)
+    M = np.stack([m[:nm].reshape(nm, -1) for m in mode_sets])  # (F, n, px)
+    if np.iscomplexobj(M):              # derivation assumes real modes
+        return np.ones(shape, bool)
+    F = (B[:, None, :] * PM[None, :, :]).reshape(-1, B.shape[1])
+    F = F / np.sqrt(np.einsum("ij,ij->i", F.real, F.real)
+                    + np.einsum("ij,ij->i", F.imag, F.imag))[:, None]
+    Mall = M.reshape(-1, M.shape[-1])
+    A = (F.real @ Mall.T + 1j * (F.imag @ Mall.T)).reshape(
+        len(bases), len(masks), len(mode_sets), nm)
+    G = np.einsum("fix,fjx->fij", M, M)
+    dec = A / np.sqrt(np.einsum("fii->fi", G))[None, None]
+    num = (dec.conj() * A).sum(-1)
+    den = np.einsum("lpfi,fij,lpfj->lpf", dec.conj(), G, dec).real
+    with np.errstate(divide="ignore", invalid="ignore"):
+        eta = (np.abs(num) ** 2 / den).transpose(0, 2, 1)       # (L, F, P)
+    bad = ~np.isfinite(eta)
+    if bad.all():
+        return np.ones(shape, bool)
+    return bad | (eta >= np.nanmax(np.where(bad, np.nan, eta)) - _SCREEN_TOL)
+
 
 class HolographyDataProcessor:
     """Automated processor for holography data"""
@@ -212,14 +262,25 @@ class HolographyDataProcessor:
         # 13 unique masks once instead of regenerating one per (lp, fov, phase).
         phase_masks = {float(pf): generatePhaseMask(grid, pf)
                        for pf in self._phases}
+        recovered = [self._recover_field(hologram, lp) for lp in self._lp_cuts]
+        bases = [normalizeIntensity(self._center_on_beam(ES_full, grid))
+                 for ES_full, _, _ in recovered]
+        mode_sets = [self._modes_at(fov, wl_m) for fov in self._fovs]
+        keep = _screen_candidates(
+            bases, mode_sets, self._num_modes,
+            [phase_masks[float(pf)] for pf in self._phases])
+
+        # Exact search, unchanged, over only the combinations the screen kept.
         best = None
-        for lp in self._lp_cuts:
-            ES_full, centroid, sel = self._recover_field(hologram, lp)
-            base = normalizeIntensity(self._center_on_beam(ES_full, grid))
-            for fov in self._fovs:
-                modes = self._modes_at(fov, wl_m)
+        for li, lp in enumerate(self._lp_cuts):
+            ES_full, centroid, sel = recovered[li]
+            base = bases[li]
+            for fi, fov in enumerate(self._fovs):
+                modes = mode_sets[fi]
                 nm = min(self._num_modes, modes.shape[0])
-                for pf in self._phases:
+                for pi, pf in enumerate(self._phases):
+                    if not keep[li, fi, pi]:
+                        continue
                     fld = normalizeIntensity(base * phase_masks[float(pf)])
                     dec = modeDecomp(fld, modes, nm)
                     rec = combinedOutput(modes[:nm], dec)
