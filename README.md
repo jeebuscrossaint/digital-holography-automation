@@ -183,6 +183,11 @@ says how many frames it covers.
   which hides this. So an 8-mode basis around one axis does not fully describe
   this lantern. Its core size will decide whether it needs more modes. Until
   then, `pipeline` keeps the better engine per frame.
+- **The library also trails on a single port.** On the one-port Jun 9 sweep
+  (51 frames, no background subtraction) it reaches 85.0%, against 96.6% for
+  single-frame. With one port there is no per-port centring, so this
+  ~11-point gap is a separate open problem. Filter settings, crop centre and
+  carrier method have been ruled out.
 - **Mode count is unconfirmed.** Doubling the basis from 8 to 15–17 modes
   raises the Jun 9 fidelity only from 97.2% to 97.7%. Extra modes mostly fit
   noise. See CLAUDE.md, "Two open physics questions."
